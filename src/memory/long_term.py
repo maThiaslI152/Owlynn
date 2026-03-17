@@ -6,6 +6,7 @@ and defines graph nodes for injecting context and extracting facts.
 """
 
 import os
+import asyncio
 
 # Mem0 implicitly initializes its internal default OpenAI client during setup,
 # so we provide a dummy key to prevent `api_key` initialization errors,
@@ -13,7 +14,7 @@ import os
 os.environ["OPENAI_API_KEY"] = "sk-dummy-key"
 
 from mem0 import Memory
-from langchain_core.messages import SystemMessage
+from langchain_core.messages import SystemMessage, HumanMessage
 from src.agent.state import AgentState
 
 # To avoid circular imports, we import get_llm inside the node
@@ -26,10 +27,15 @@ async def analyze_memory_node(state: AgentState):
     if not messages:
         return {}
 
-    # Only run analysis on the last message if it's an assistant response 
-    # and no more tool calls are pending.
+    # DEBUG LOG Start
+    with open("/tmp/prompt_debug.txt", "a") as f:
+        f.write("\n>>> [Node] analyze_memory_node ENTERING\n")
+        f.write(f"Messages count: {len(messages)}\n")
+        if messages: f.write(f"Last msg type: {messages[-1].type}\n")
+
     last_msg = messages[-1]
     if last_msg.type != "ai" or (hasattr(last_msg, "tool_calls") and last_msg.tool_calls):
+        with open("/tmp/prompt_debug.txt", "a") as f: f.write(">>> [Node] analyze_memory_node SKIPPING: Not AI or has tool calls\n")
         return {}
 
     # Get the last couple of turns for context
@@ -59,7 +65,7 @@ CONVERSATION:
 EXTRACTED FACTS:
 """
     try:
-        response = await llm.ainvoke([SystemMessage(content=prompt)])
+        response = await asyncio.wait_for(llm.ainvoke([HumanMessage(content=prompt)]), timeout=15.0)
         content = response.content.strip()
         
         if content == "NONE" or not content:
@@ -141,7 +147,7 @@ def inject_context_node(state: AgentState):
         return {"long_term_context": ""}
 
 
-def extract_facts_node(state: AgentState):
+async def extract_facts_node(state: AgentState):
     """
     Post-Execution Node.
     After a task finishes, this node looks at any facts the agent explicitly extracted 
@@ -155,7 +161,7 @@ def extract_facts_node(state: AgentState):
             # We explicitly pass infer=False because our local agent already handled the
             # intelligent extraction of facts; Mem0 just needs to store them directly.
             for fact in facts:
-                memory.add(fact, user_id=project_id, infer=False)
+                await asyncio.to_thread(memory.add, fact, user_id=project_id, infer=False)
             
             # Optionally clear the thread facts now that they are in long-term storage
             # return {"extracted_facts": []} 

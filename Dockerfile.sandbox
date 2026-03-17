@@ -1,0 +1,12 @@
+FROM python:3.11-slim
+
+# Install system dependencies if any, or just python packages
+RUN pip install --no-cache-dir \
+    matplotlib \
+    pandas \
+    numpy \
+    scipy \
+    seaborn
+
+# Set some environment variables if needed
+ENV PYTHONUNBUFFERED=1

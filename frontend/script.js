@@ -3,6 +3,7 @@ let currentSessionId = generateUUID();
 let socket = null;
 let isReasoning = false;
 let pendingFiles = []; // { name, type, data (base64), preview? }
+let currentSubPath = ''; // Tracks current folder level in workspace view
 let activeMode = 'tools_on'; // default: 'tools_on' or 'tools_off'
 let activeProjectId = 'default';
 let activeAiMessage = null; 
@@ -64,6 +65,7 @@ sessionIdEl.value = currentSessionId;
 connectWebSocket();
 loadSettingsData();
 loadProjects();
+loadWorkspaceFiles(); // Initial load for Workspace Files panel
 
 async function loadSettingsData() {
     try {
@@ -199,8 +201,28 @@ function renderProjects(projects) {
         
         item.innerHTML = `
             <span class="w-2 h-2 rounded-full ${isActive ? 'bg-anthropic' : 'bg-gray-300'}"></span>
-            <span class="truncate ${isActive ? 'font-medium text-textdark' : ''}">${project.name}</span>
+            <span class="truncate flex-1 ${isActive ? 'font-medium text-textdark' : ''}">${project.name}</span>
+            ${project.id !== 'default' ? `
+            <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <button class="edit-project-btn p-1 rounded-md hover:bg-gray-200 text-gray-400 hover:text-anthropic" title="Rename Project">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+                </button>
+                <button class="delete-project-btn p-1 rounded-md hover:bg-gray-200 text-gray-400 hover:text-red-500" title="Delete Project">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                </button>
+            </div>
+            ` : ''}
         `;
+        
+        item.querySelector('.edit-project-btn')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            editProject(project.id, project.name);
+        });
+        
+        item.querySelector('.delete-project-btn')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            deleteProject(project.id, project.name);
+        });
         
         item.onclick = () => switchProject(project.id);
         projectsListEl.appendChild(item);
@@ -308,7 +330,7 @@ function renderProjectChats(chats) {
     sortedChats.forEach(chat => {
         const isActive = chat.id === currentSessionId;
         const item = document.createElement('div');
-        item.className = `flex items-center gap-2 p-2 rounded text-xs cursor-pointer transition-colors ${
+        item.className = `group flex items-center gap-2 p-2 rounded text-xs cursor-pointer transition-colors ${
             isActive ? 'bg-anthropic text-white' : 'bg-white border border-bordercolor hover:bg-gray-50'
         }`;
         
@@ -317,8 +339,25 @@ function renderProjectChats(chats) {
         item.innerHTML = `
             <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${isActive ? 3 : 2}" stroke-linecap="round" stroke-linejoin="round" class="${isActive ? 'text-white' : 'text-gray-400'}"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
             <span class="truncate flex-1 font-medium">${chat.name || 'Chat'}</span>
-            <span class="opacity-60 text-[10px]">${date}</span>
+            <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <button class="edit-chat-btn p-1 rounded-md hover:bg-white/20 text-current opacity-70 hover:opacity-100" title="Rename Chat">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+                </button>
+                <button class="delete-chat-btn p-1 rounded-md hover:bg-white/20 text-current opacity-70 hover:opacity-100" title="Delete Chat">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                </button>
+            </div>
+            <span class="opacity-60 text-[10px] whitespace-nowrap">${date}</span>
         `;
+        
+        item.querySelector('.edit-chat-btn').onclick = (e) => {
+            e.stopPropagation();
+            editChat(chat.id, chat.name);
+        };
+        item.querySelector('.delete-chat-btn').onclick = (e) => {
+            e.stopPropagation();
+            deleteChat(chat.id, chat.name);
+        };
         
         item.onclick = () => switchChat(chat.id);
         projectChatsList.appendChild(item);
@@ -350,11 +389,83 @@ async function switchChat(sessionId) {
     renderProjectChats(project.chats || []);
 }
 
+async function editChat(chatId, currentName) {
+    const newName = await showCustomInput('Rename Chat', 'Chat Name', currentName);
+    if (!newName || newName === currentName) return;
+    
+    try {
+        await fetch(`/api/projects/${activeProjectId}/chats/${chatId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: newName })
+        });
+        switchProject(activeProjectId, false);
+    } catch (e) {
+        console.error('Failed to rename chat:', e);
+    }
+}
+
+async function deleteChat(chatId, chatName) {
+    if (!confirm(`Are you sure you want to delete the chat "${chatName || 'Chat'}"?`)) return;
+    
+    try {
+        await fetch(`/api/projects/${activeProjectId}/chats/${chatId}`, {
+            method: 'DELETE'
+        });
+        switchProject(activeProjectId, false);
+        if (chatId === currentSessionId) {
+             newChatBtn.click();
+        }
+    } catch (e) {
+        console.error('Failed to delete chat:', e);
+    }
+}
+
+async function editProject(projectId, currentName) {
+    const newName = await showCustomInput('Rename Project', 'Project Name', currentName);
+    if (!newName || newName === currentName) return;
+    
+    try {
+        await fetch(`/api/projects/${projectId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: newName })
+        });
+        loadProjects();
+    } catch (e) {
+        console.error('Failed to rename project:', e);
+    }
+}
+
+async function deleteProject(projectId, projectName) {
+    if (!confirm(`Are you sure you want to delete the project "${projectName}"? This will delete associated workspace files.`)) return;
+    
+    try {
+        const res = await fetch(`/api/projects/${projectId}`, {
+            method: 'DELETE'
+        });
+        const data = await res.json();
+        if (data.status === 'ok') {
+             if (projectId === activeProjectId) {
+                  activeProjectId = 'default';
+                  switchProject('default');
+             } else {
+                  loadProjects();
+             }
+        } else {
+             alert(data.message || 'Failed to delete project');
+        }
+    } catch (e) {
+        console.error('Failed to delete project:', e);
+    }
+}
+
+
 addProjectBtn?.addEventListener('click', async () => {
-    const name = prompt('Project Name:');
+    const name = await showCustomInput('New Project', 'Project Name');
     if (!name) return;
     
-    const instructions = prompt('Project Instructions (optional):');
+    const instructions = await showCustomInput('Project Details', 'Project Instructions (optional)');
     
     try {
         const res = await fetch('/api/projects', {
@@ -374,16 +485,24 @@ addProjectBtn?.addEventListener('click', async () => {
 
 openSettingsBtn?.addEventListener('click', () => {
     settingsModal.classList.remove('hidden');
+    settingsModal.classList.add('flex');
     loadSettingsData();
 });
 
-closeSettingsBtn?.addEventListener('click', () => settingsModal.classList.add('hidden'));
-closeSettingsFooterBtn?.addEventListener('click', () => settingsModal.classList.add('hidden'));
+closeSettingsBtn?.addEventListener('click', () => {
+    settingsModal.classList.add('hidden');
+    settingsModal.classList.remove('flex');
+});
+closeSettingsFooterBtn?.addEventListener('click', () => {
+    settingsModal.classList.add('hidden');
+    settingsModal.classList.remove('flex');
+});
 
 // Close modal when clicking outside content
 settingsModal?.addEventListener('click', (e) => {
     if (e.target === settingsModal) {
         settingsModal.classList.add('hidden');
+        settingsModal.classList.remove('flex');
     }
 });
 
@@ -452,7 +571,7 @@ newChatBtn.addEventListener('click', async () => {
     pendingFiles = [];
     renderPreviews();
     
-    const chatName = prompt('Enter a name for this chat (optional):', 'New Chat') || 'New Chat';
+    const chatName = await showCustomInput('New Chat', 'Chat Name', 'New Chat') || 'New Chat';
     
     // Save mapping to localStorage
     if (activeProjectId) {
@@ -513,29 +632,61 @@ attachBtn.addEventListener('click', () => fileInput.click());
 fileInput.addEventListener('change', (e) => processFiles(e.target.files));
 
 // ─── Drag and Drop ──────────────────────────────────────────────────────────
-document.body.addEventListener('dragenter', (e) => {
+// ─── Drag and Drop (Chat Attachments) ───────────────────────────────────────
+chatContainer.addEventListener('dragenter', (e) => {
     e.preventDefault();
     if (e.dataTransfer.types.includes('Files')) {
         dragOverlay.classList.remove('hidden');
+        dragOverlay.classList.add('flex');
     }
 });
 
-document.body.addEventListener('dragover', (e) => {
+chatContainer.addEventListener('dragover', (e) => {
     e.preventDefault();
 });
 
-document.body.addEventListener('dragleave', (e) => {
-    // Only hide when leaving the body entirely
-    if (!e.relatedTarget || e.relatedTarget === document.body) {
+chatContainer.addEventListener('dragleave', (e) => {
+    // Only hide when leaving the boundaries
+    if (!e.relatedTarget || !chatContainer.contains(e.relatedTarget)) {
         dragOverlay.classList.add('hidden');
+        dragOverlay.classList.remove('flex');
     }
 });
 
-document.body.addEventListener('drop', (e) => {
+dragOverlay.addEventListener('drop', (e) => {
     e.preventDefault();
     dragOverlay.classList.add('hidden');
+    dragOverlay.classList.remove('flex');
+    
+    // Check for Workspace Drag Reference
+    const workspaceData = e.dataTransfer.getData('application/json');
+    if (workspaceData) {
+        try {
+            const file = JSON.parse(workspaceData);
+            if (file.source === 'workspace') {
+                processWorkspaceFileToChat(file);
+                return;
+            }
+        } catch (err) {
+            console.error('Failed to parse workspace drop:', err);
+        }
+    }
+    
     processFiles(e.dataTransfer.files);
 });
+
+// Helper for adding Workspace file references to Chat Attachments
+function processWorkspaceFileToChat(file) {
+    const fileItem = {
+        name: file.name,
+        type: 'workspace_ref', // Mark as internal reference
+        path: file.path, 
+        size: 0, 
+        base64: "" // Safe loaded bypass
+    };
+    currentFiles.push(fileItem);
+    renderFilePreviews();
+}
 
 // WebSocket Logic
 function connectWebSocket() {
@@ -552,6 +703,8 @@ function connectWebSocket() {
         
         if (data.type === 'status') {
             updateAgentStatus(data.content);
+        } else if (data.type === 'file_status') {
+            loadWorkspaceFiles(); // Live refresh Workspace panel lists on updates
         } else if (data.type === 'message') {
             renderMessage(data.message);
         } else if (data.type === 'chunk') {
@@ -610,13 +763,17 @@ function updateAgentStatus(status) {
         agentStatus.textContent = 'Waiting for input...';
         agentStatus.className = 'mt-2 text-xs font-mono text-gray-400';
         sendBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>';
+        sendBtn.title = "Send message";
         
         finalizeActiveMessage();
     } else {
         isReasoning = true;
         agentStatus.textContent = 'Agent is reasoning...';
         agentStatus.className = 'mt-2 text-xs font-mono text-anthropic animate-pulse';
-        sendBtn.innerHTML = '<div class="w-5 h-5 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin"></div>';
+        // Display a STOP Square button next to or inside the action scope
+        sendBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-anthropic cursor-pointer hover:text-red-500"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor"/></svg>';
+        sendBtn.title = "Stop Generating";
+        sendBtn.disabled = false; // Ensure click is enabled for Stop
     }
 }
 
@@ -660,6 +817,13 @@ function renderPreviews() {
             img.src = f.preview;
             img.className = 'w-8 h-8 object-cover rounded';
             chip.appendChild(img);
+        } else if (f.type === 'workspace_ref') {
+            // Workspace File Icon
+            const icon = document.createElement('div');
+            icon.className = 'w-8 h-8 rounded bg-orange-50 flex items-center justify-center text-orange-600';
+            icon.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 22h16a2 2 0 0 0 2-2V7.5L14.5 2H6a2 2 0 0 0-2 2v4"/><polyline points="14 2 14 8 20 8"/></svg>';
+            chip.appendChild(icon);
+            chip.classList.add('border-orange-200', 'bg-orange-50/50');
         } else {
             // File type icon
             const icon = document.createElement('div');
@@ -910,9 +1074,15 @@ function addMessageActions(contentDiv, textContent, wrapper) {
     contentDiv.appendChild(actionsDiv);
 }
 function handleSend(e) {
-    e.preventDefault();
+    if (e) e.preventDefault();
+
+    if (isReasoning) {
+        stopLlm();
+        return;
+    }
+    
     const text = messageInput.value.trim();
-    if ((!text && pendingFiles.length === 0) || isReasoning || socket.readyState !== WebSocket.OPEN) return;
+    if ((!text && pendingFiles.length === 0) || socket.readyState !== WebSocket.OPEN) return;
     
     // Optimistic UI
     renderUserMessage(text, pendingFiles);
@@ -921,7 +1091,7 @@ function handleSend(e) {
     // Send to backend with files and current mode
     socket.send(JSON.stringify({ 
         message: text, 
-        files: pendingFiles.map(f => ({ name: f.name, type: f.type, data: f.data })),
+        files: pendingFiles.map(f => ({ name: f.name, type: f.type, data: f.data, path: f.path })),
         mode: activeMode,
         project_id: activeProjectId
     }));
@@ -933,6 +1103,12 @@ function handleSend(e) {
     pendingFiles = [];
     renderPreviews();
     fileInput.value = '';
+}
+
+function stopLlm() {
+    if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ type: 'stop' }));
+    }
 }
 
 function renderUserMessage(text, files = []) {
@@ -965,17 +1141,43 @@ function renderUserMessage(text, files = []) {
     }
     
     if (text) {
-        const bubble = document.createElement('div');
-        bubble.className = 'bg-userbubble text-textdark px-5 py-3 rounded-2xl text-base relative group';
-        
-        const textSpan = document.createElement('span');
+        let cleanedText = text;
+        const foundFiles = [];
+
         if (typeof text === 'string') {
-            textSpan.textContent = text;
-        } else if (Array.isArray(text)) {
-            // Find the text part in multimodal content
-            const textPart = text.find(p => p.type === 'text');
-            textSpan.textContent = textPart ? textPart.text : '[Multimodal Content]';
+            const fileRegex = /\[File:\s+([^\]]+)\]\s*[\r\n]+```[\s\S]*?```/g;
+            let match;
+            while ((match = fileRegex.exec(text)) !== null) {
+                foundFiles.push(match[1]);
+            }
+            if (foundFiles.length > 0) {
+                cleanedText = text.replace(fileRegex, '').trim();
+                
+                const fileRow = document.createElement('div');
+                fileRow.className = 'flex flex-wrap gap-2 justify-end mb-1';
+                foundFiles.forEach(name => {
+                    const chip = document.createElement('div');
+                    chip.className = 'flex items-center gap-1.5 bg-userbubble border border-bordercolor px-2 py-1 rounded-lg text-xs text-gray-600';
+                    chip.innerHTML = `📄 <span>${name}</span>`;
+                    fileRow.appendChild(chip);
+                });
+                inner.appendChild(fileRow);
+            }
         }
+
+        if (cleanedText || Array.isArray(text)) {
+            const bubble = document.createElement('div');
+            bubble.className = 'bg-userbubble text-textdark px-5 py-3 rounded-2xl text-base relative group';
+            
+            const textSpan = document.createElement('span');
+            if (typeof text === 'string') {
+                textSpan.textContent = cleanedText;
+            } else if (Array.isArray(text)) {
+                // Find the text part in multimodal content
+                const textPart = text.find(p => p.type === 'text');
+                textSpan.textContent = textPart ? textPart.text : '[Multimodal Content]';
+            }
+
         
         const editBtn = document.createElement('button');
         editBtn.className = 'absolute -left-6 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 hover:text-black';
@@ -1041,6 +1243,7 @@ function renderUserMessage(text, files = []) {
         bubble.appendChild(textSpan);
         bubble.appendChild(editBtn);
         inner.appendChild(bubble);
+    }
     }
     
     wrapper.appendChild(inner);
@@ -1230,4 +1433,436 @@ function generateUUID() {
 
 function scrollToBottom() {
     chatContainer.scrollTop = chatContainer.scrollHeight;
+}
+
+// Custom Input Modal Helper
+function showCustomInput(title, label, defaultValue = '') {
+    return new Promise((resolve) => {
+        const modal = document.getElementById('customInputModal');
+        const titleEl = document.getElementById('customInputTitle');
+        const labelEl = document.getElementById('customInputLabel');
+        const inputEl = document.getElementById('customInputField');
+        const confirmBtn = document.getElementById('confirmCustomInputBtn');
+        const cancelBtn = document.getElementById('cancelCustomInputBtn');
+        const closeBtn = document.getElementById('closeCustomInputBtn');
+
+        if (!modal || !titleEl || !labelEl || !inputEl || !confirmBtn || !cancelBtn || !closeBtn) {
+            console.error('Custom Input Modal elements not found');
+            resolve(prompt(label, defaultValue)); // Fallback
+            return;
+        }
+
+        titleEl.textContent = title;
+        labelEl.textContent = label;
+        inputEl.value = defaultValue;
+        
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+        
+        // Timeout to ensure display is applied before focus
+        setTimeout(() => {
+            inputEl.focus();
+            inputEl.select();
+        }, 10);
+
+        const cleanup = () => {
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+            confirmBtn.onclick = null;
+            cancelBtn.onclick = null;
+            closeBtn.onclick = null;
+            inputEl.onkeydown = null;
+            modal.onclick = null;
+        };
+
+        const handleConfirm = () => {
+            const value = inputEl.value;
+            cleanup();
+            resolve(value);
+        };
+
+        const handleCancel = () => {
+            cleanup();
+            resolve(null);
+        };
+
+        confirmBtn.onclick = handleConfirm;
+        cancelBtn.onclick = handleCancel;
+        closeBtn.onclick = handleCancel;
+
+        modal.onclick = (e) => {
+            if (e.target === modal) handleCancel();
+        };
+
+        inputEl.onkeydown = (e) => {
+            if (e.key === 'Enter') handleConfirm();
+            if (e.key === 'Escape') handleCancel();
+        };
+    });
+}
+
+// ─── Workspace File Explorer Panel ──────────────────────────────────────────
+async function loadWorkspaceFiles() {
+    const listEl = document.getElementById('workspaceFilesList');
+    if (!listEl) return;
+    
+    try {
+        const res = await fetch(`/api/files?sub_path=${encodeURIComponent(currentSubPath)}`);
+        const files = await res.json();
+        renderWorkspaceFiles(files);
+        renderBreadcrumbs();
+    } catch (e) {
+        console.error('Failed to load workspace files:', e);
+    }
+}
+
+function renderBreadcrumbs() {
+    const breadcrumbs = document.getElementById('workspaceBreadcrumbs');
+    if (!breadcrumbs) return;
+    
+    breadcrumbs.innerHTML = '<span class="cursor-pointer hover:text-black font-medium text-gray-700" onclick="navigateToFolder(\'\')">Workspace</span>';
+    
+    if (currentSubPath) {
+        const parts = currentSubPath.split('/').filter(p => p);
+        let pathAccum = '';
+        parts.forEach(part => {
+            pathAccum += (pathAccum ? '/' : '') + part;
+            const currentPath = pathAccum; // Capture closed scope
+            breadcrumbs.innerHTML += `
+                <span class="text-gray-400">/</span>
+                <span class="cursor-pointer hover:text-black" onclick="navigateToFolder('${currentPath.replace(/'/g, "\\'")}')">${part}</span>
+            `;
+        });
+    }
+}
+
+function navigateToFolder(path) {
+    currentSubPath = path;
+    loadWorkspaceFiles();
+}
+
+function renderWorkspaceFiles(files) {
+    const listEl = document.getElementById('workspaceFilesList');
+    if (!listEl) return;
+    listEl.innerHTML = '';
+    
+    if (files.length === 0) {
+        listEl.innerHTML = '<p class="text-xs text-gray-400 italic text-center py-8">No files in workspace.</p>';
+        return;
+    }
+    
+    files.forEach(file => {
+        const item = document.createElement('div');
+        item.className = 'group flex items-center justify-between gap-2 p-2.5 bg-gray-50 border border-bordercolor rounded-xl text-xs hover:border-anthropic/30 hover:bg-white transition-all';
+        item.dataset.filename = file.name;
+        
+        // Make draggable only for files
+        if (file.type === 'file') {
+             item.setAttribute('draggable', 'true');
+             item.classList.add('cursor-grab', 'active:cursor-grabbing');
+             item.addEventListener('dragstart', (e) => {
+                 e.dataTransfer.setData('application/json', JSON.stringify({
+                     source: 'workspace',
+                     name: file.name,
+                     path: currentSubPath ? `${currentSubPath}/${file.name}` : file.name
+                 }));
+             });
+        } else if (file.type === 'folder') {
+             item.classList.add('cursor-pointer');
+             item.onclick = () => navigateToFolder(currentSubPath ? `${currentSubPath}/${file.name}` : file.name);
+        }
+        
+        const isProcessing = file.status === 'processing';
+        const isProcessed = file.status === 'processed';
+        const isFolder = file.type === 'folder';
+        
+        item.innerHTML = `
+            <div class="flex items-center gap-2 flex-1 min-w-0 pointer-events-none">
+                <div class="p-1.5 rounded-lg ${isFolder ? 'bg-yellow-50 text-yellow-600' : 'bg-gray-100 text-gray-500'}">
+                    ${isFolder ? 
+                       '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>' :
+                       '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>'
+                    }
+                </div>
+                <div class="flex-1 min-w-0">
+                    <p class="font-medium text-gray-800 truncate" title="${file.name}">${file.name}</p>
+                    <p class="text-[10px] text-gray-400">${isFolder ? 'Folder' : formatBytes(file.size)} ${!isFolder ? '• ' + new Date(file.modified * 1000).toLocaleDateString() : ''}</p>
+                </div>
+                <div class="status-badge">
+                    ${isProcessing && !isFolder ? '<span class="flex h-2 w-2 relative"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-yellow-400 opacity-75"></span><span class="relative inline-flex rounded-full h-2 w-2 bg-yellow-500"></span></span>' : ''}
+                    ${isProcessed && !isFolder ? '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="text-green-500"><polyline points="20 6 9 17 4 12"/></svg>' : ''}
+                </div>
+            </div>
+            <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <button class="view-file-btn p-1 rounded-md hover:bg-gray-100 text-gray-400 hover:text-black" title="View">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0z"/><circle cx="12" cy="12" r="3"/></svg>
+                </button>
+                <button class="rename-file-btn p-1 rounded-md hover:bg-gray-100 text-gray-400 hover:text-anthropic" title="Rename">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+                </button>
+                <button class="delete-file-btn p-1 rounded-md hover:bg-gray-100 text-gray-400 hover:text-red-500" title="Delete">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                </button>
+            </div>
+        `;
+        
+        item.querySelector('.view-file-btn').onclick = (e) => { e.stopPropagation(); viewWorkspaceFile(file.name); };
+        item.querySelector('.rename-file-btn').onclick = (e) => { e.stopPropagation(); renameWorkspaceFile(file.name); };
+        item.querySelector('.delete-file-btn').onclick = (e) => { e.stopPropagation(); deleteWorkspaceFile(file.name); };
+        
+        listEl.appendChild(item);
+    });
+}
+
+async function deleteWorkspaceFile(name) {
+    if (!confirm(`Delete file "${name}" from workspace?`)) return;
+    try {
+        await fetch(`/api/files/${encodeURIComponent(name)}?sub_path=${encodeURIComponent(currentSubPath)}`, { method: 'DELETE' });
+        loadWorkspaceFiles();
+    } catch (e) {
+        console.error('Failed to delete file:', e);
+    }
+}
+
+async function renameWorkspaceFile(name) {
+    const newName = await showCustomInput('Rename File', 'New Name', name);
+    if (!newName || newName === name) return;
+    try {
+        await fetch(`/api/files/${encodeURIComponent(name)}/rename`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ new_name: newName, sub_path: currentSubPath })
+        });
+        loadWorkspaceFiles();
+    } catch (e) {
+        console.error('Failed to rename file:', e);
+    }
+}
+
+function formatBytes(bytes, decimals = 2) {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const dm = decimals < 0 ? 0 : decimals;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+}
+
+// Bind direct upload buttons
+const uploadWorkspaceBtn = document.getElementById('uploadWorkspaceBtn');
+const workspaceFileInput = document.getElementById('workspaceFileInput');
+
+uploadWorkspaceBtn?.addEventListener('click', () => workspaceFileInput?.click());
+
+workspaceFileInput?.addEventListener('change', async (e) => {
+    if (e.target.files.length === 0) return;
+    const formData = new FormData();
+    for (const file of e.target.files) {
+        formData.append('file', file);
+        // Upload immediately via POST
+        try {
+            await fetch(`/api/upload?sub_path=${encodeURIComponent(currentSubPath)}`, { method: 'POST', body: formData });
+        } catch (err) {
+            console.error('Upload failed:', err);
+        }
+    }
+    loadWorkspaceFiles(); // Refresh
+});
+
+// Bind specialized Drag & Drop on Workspace Explorer Panel
+const workspacePanel = document.getElementById('workspacePanel');
+const workspaceDropZone = document.getElementById('workspaceDropZone');
+let workspaceDragCounter = 0; // Fixes nested bubbling locks
+
+if (workspacePanel && workspaceDropZone) {
+    workspacePanel.addEventListener('dragenter', (e) => {
+        e.preventDefault(); e.stopPropagation();
+        workspaceDragCounter++;
+        workspaceDropZone.classList.remove('hidden');
+    });
+
+    workspacePanel.addEventListener('dragover', (e) => {
+        e.preventDefault(); e.stopPropagation();
+    });
+
+    workspacePanel.addEventListener('dragleave', (e) => {
+        e.preventDefault(); e.stopPropagation();
+        workspaceDragCounter--;
+        if (workspaceDragCounter <= 0) {
+            workspaceDropZone.classList.add('hidden');
+        }
+    });
+
+    // Handle dragleave on dropzone as well to safeguard exiting
+    workspaceDropZone.addEventListener('dragleave', (e) => {
+        e.preventDefault(); e.stopPropagation();
+        workspaceDragCounter = 0;
+        workspaceDropZone.classList.add('hidden');
+    });
+
+    workspaceDropZone.addEventListener('drop', async (e) => {
+        e.preventDefault(); e.stopPropagation();
+        workspaceDragCounter = 0; // Reset
+        workspaceDropZone.classList.add('hidden');
+        
+        const files = e.dataTransfer.files;
+        if (!files.length) return;
+        
+        for (const file of files) {
+            const formData = new FormData();
+            formData.append('file', file);
+            try {
+                await fetch(`/api/upload?sub_path=${encodeURIComponent(currentSubPath)}`, { method: 'POST', body: formData });
+            } catch (err) {
+                console.error('Upload failed:', err);
+            }
+        }
+        loadWorkspaceFiles();
+    });
+}
+
+// ─── Workspace File Viewer Modal ────────────────────────────────────────────
+async function viewWorkspaceFile(name) {
+    const modal = document.getElementById('fileViewerModal');
+    const titleEl = document.getElementById('fileViewerTitle');
+    const contentEl = document.getElementById('fileViewerContent');
+    const downloadBtn = document.getElementById('downloadFileBtn');
+    
+    if (!modal || !contentEl) return;
+    
+    titleEl.textContent = name;
+    contentEl.innerHTML = '<p class="text-xs text-gray-400 animate-pulse">Loading preview...</p>';
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+    
+    downloadBtn.onclick = () => window.open(`/api/files/${encodeURIComponent(name)}`, '_blank');
+    
+    const ext = name.split('.').pop().toLowerCase();
+    
+    if (ext === 'pdf') {
+        contentEl.innerHTML = `<iframe src="/api/files/${encodeURIComponent(name)}" class="w-full h-full border-0"></iframe>`;
+    } else if (['png', 'jpg', 'jpeg', 'gif', 'svg'].includes(ext)) {
+        contentEl.innerHTML = `<img src="/api/files/${encodeURIComponent(name)}" class="max-w-full max-h-full object-contain p-4" />`;
+    } else {
+        // Assume text file for now (py, txt, md, csv)
+        try {
+            const res = await fetch(`/api/files/${encodeURIComponent(name)}`);
+            const text = await res.text();
+            contentEl.innerHTML = `<pre class="w-full h-full p-6 text-xs text-gray-700 font-mono bg-white overflow-auto whitespace-pre-wrap">${escapeHtml(text)}</pre>`;
+        } catch (e) {
+            contentEl.innerHTML = `<p class="text-red-500 text-xs">Failed to load content.</p>`;
+        }
+    }
+}
+
+function escapeHtml(text) {
+    return text.replace(/[&<>"']/g, function(m) {
+        return {
+            '&': '&amp;', '<': '&lt;', '>': '&gt;',
+            '"': '&quot;', "'": '&#039;'
+        }[m];
+    });
+}
+
+// Bind Viewer Modal Close Events
+document.getElementById('closeFileViewerBtn')?.addEventListener('click', () => {
+    const modal = document.getElementById('fileViewerModal');
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
+    document.getElementById('fileViewerContent').innerHTML = ''; // Clear iframe memory leaky
+});
+
+document.getElementById('fileViewerModal')?.addEventListener('click', (e) => {
+    if (e.target === document.getElementById('fileViewerModal')) {
+        const modal = document.getElementById('fileViewerModal');
+        modal.classList.add('hidden');
+        modal.classList.remove('flex');
+        document.getElementById('fileViewerContent').innerHTML = '';
+    }
+});
+
+// ─── Workspace Resizable Sidebar ───────────────────────────────────────────
+(function initWorkspaceResizer() {
+    const handle = document.getElementById('workspaceResizeHandle');
+    const panel = document.getElementById('workspacePanel');
+    if (!handle || !panel) return;
+
+    let isResizing = false;
+
+    handle.addEventListener('mousedown', (e) => {
+        isResizing = true;
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none'; // Prevent text selection
+    });
+
+    window.addEventListener('mousemove', (e) => {
+        if (!isResizing) return;
+        const offsetLeft = panel.getBoundingClientRect().left;
+        const newWidth = e.clientX - offsetLeft;
+        
+        // Boundaries
+        if (newWidth > 200 && newWidth < 600) {
+             panel.style.width = `${newWidth}px`;
+        }
+    });
+
+    window.addEventListener('mouseup', () => {
+        if (isResizing) {
+            isResizing = false;
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+        }
+    });
+})();
+
+// ─── Workspace New Folder Toolbar Trigger ───────────────────────────────────
+document.getElementById('newFolderBtn')?.addEventListener('click', async () => {
+    const name = await showCustomInput('New Folder', 'Folder Name', '');
+    if (!name) return;
+    
+    try {
+        const res = await fetch('/api/folders', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: name, sub_path: currentSubPath })
+        });
+        const data = await res.json();
+        if (data.status === 'ok') {
+            loadWorkspaceFiles(); // Refresh
+        } else {
+            alert(data.message || 'Failed to create folder');
+        }
+    } catch (e) {
+        console.error('New Folder error:', e);
+    }
+});
+
+function showCustomInput(title, label, defaultValue) {
+    return new Promise((resolve) => {
+        const modal = document.getElementById('renameModal'); // Reuse rename Modal for input
+        const titleEl = document.getElementById('renameModalTitle');
+        const labelEl = document.getElementById('renameModalLabel');
+        const input = document.getElementById('newFilenameInput');
+        const cancelBtn = document.getElementById('cancelRenameBtn');
+        const confirmBtn = document.getElementById('confirmRenameBtn');
+
+        if (!modal) { resolve(null); return; }
+
+        titleEl.textContent = title;
+        labelEl.textContent = label;
+        input.value = defaultValue;
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+        input.focus();
+
+        const close = (val) => {
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+            resolve(val);
+        };
+
+        confirmBtn.onclick = () => close(input.value.trim());
+        cancelBtn.onclick = () => close(null);
+        input.onkeyup = (e) => { if (e.key === 'Enter') close(input.value.trim()); };
+    });
 }

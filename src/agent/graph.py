@@ -9,7 +9,7 @@ between 'reasoning' (agentic) and 'fast' (chat) modes.
 from langgraph.graph import StateGraph, START, END, MessagesState
 from langgraph.checkpoint.redis.aio import AsyncRedisSaver
 import redis
-from langchain_core.messages import SystemMessage, AIMessage, ToolMessage, RemoveMessage
+from langchain_core.messages import SystemMessage, AIMessage, ToolMessage, RemoveMessage, HumanMessage
 from langgraph.prebuilt import ToolNode, tools_condition
 
 from .state import AgentState
@@ -115,7 +115,15 @@ CORE RULES:
 3. FILES: Access files using `list_workspace_files` and `read_workspace_file`.
 4. REASONING: Wrap ALL thinking in ONE `<thought>` block. Keep it brief.
 5. NO HALLUCINATION: If calling a tool, do NOT predict its output in the same message.
+6. FORMATTING: If calling a tool, you MUST use ONLY the following JSON block format:
+```json
+{ "name": "tool_name", "arguments": { "arg": "val" } }
+```
+Do NOT output multiple tool calls in a row and finish immediate after the block.
+7. PRESENTATION: Avoid complex ASCII art with frame/box drawing characters. For grids, matrixes, or tables, strictly use Standard Markdown Tables or simple lists to stay fast.
+8. PYTHON TIP: Inside f-string expressions (e.g. f"{var}"), do NOT use backslashes (`\`). Define the escaped string variable outside the f-string first.
 """
+
     else:
         static_rules += "Answer concisely. No preambles.\n"
 
@@ -137,31 +145,49 @@ CORE RULES:
     except Exception:
         mem_ctx = ""
 
-    dynamic_content = ""
-    if profile_ctx:
-        dynamic_content += profile_ctx + "\n\n"
-    if mem_ctx:
-        dynamic_content += mem_ctx + "\n\n"
-
-    long_term_context = state.get("long_term_context")
-    if long_term_context:
-        dynamic_content += f"\n\n{long_term_context}"
+    # Only keep profile in system_content for prefix caching
+    system_content = static_rules.strip()
+    if profile_ctx.strip():
+         system_content += "\n\n" + profile_ctx.strip()
 
     # --- 3. Assemble Messages ---
     context_limit = 10 
-    recent_messages = [m for m in messages if not isinstance(m, SystemMessage)]
-    recent_messages = recent_messages[-context_limit:]
-
-    structured_messages = []
+    all_non_system = [m for m in messages if not isinstance(m, SystemMessage)]
     
-    # System prompt at the BEGINNING for better baseline
-    structured_messages.append(SystemMessage(content=static_rules.strip()))
+    # Slicing: Adjust backwards to ensure the list begins with a HumanMessage for template safety
+    start_idx = max(0, len(all_non_system) - context_limit)
+    while start_idx > 0 and not isinstance(all_non_system[start_idx], HumanMessage):
+        start_idx -= 1
+        
+    recent_messages = all_non_system[start_idx:]
 
-    if dynamic_content.strip():
-        structured_messages.append(SystemMessage(content=dynamic_content.strip()))
+    structured_messages = [SystemMessage(content=system_content)]
     
     # Add history
     structured_messages += recent_messages
+    
+    # Inject retrieved turn-based context into the last message to preserve templates
+    long_term_context = state.get("long_term_context")
+    if mem_ctx or long_term_context:
+        ctx_msg = "\n\n--- TURN CONTEXT & MEMORIES ---\n"
+        if mem_ctx:
+            ctx_msg += mem_ctx + "\n"
+        if long_term_context:
+            ctx_msg += long_term_context + "\n"
+            
+        if structured_messages:
+            last_msg = structured_messages[-1]
+            if hasattr(last_msg, "content") and isinstance(last_msg.content, str):
+                # Recreate to avoid mutating history state by reference
+                msg_type = type(last_msg)
+                new_args = {"content": last_msg.content + ctx_msg}
+                if hasattr(last_msg, "id"): new_args["id"] = last_msg.id
+                if isinstance(last_msg, ToolMessage): new_args["tool_call_id"] = last_msg.tool_call_id
+                if isinstance(last_msg, AIMessage): new_args["tool_calls"] = getattr(last_msg, "tool_calls", [])
+                
+                structured_messages[-1] = msg_type(**new_args)
+            else:
+                 structured_messages.append(SystemMessage(content=ctx_msg.strip()))
 
     # Bind tools with LLM only if tools are enabled
     if mode == "tools_off":
@@ -175,13 +201,28 @@ CORE RULES:
         
     # Async execution
     # Async execution with stop sequences for fast mode
+    
+    # DEBUG: Log prompt structure to diagnose LM Studio Jinja template error
+    with open("/tmp/prompt_debug.txt", "a") as f:
+        f.write(f"\n--- Turn Context ---\n")
+        f.write(f"Messages Count: {len(structured_messages)}\n")
+        for i, m in enumerate(structured_messages):
+            f.write(f"[{i}] Type: {type(m).__name__}, ID: {getattr(m, 'id', 'N/A')}\n")
+            # f.write(f"Content: {m.content[:100]}...\n") 
+            
     if mode == "tools_off":
         response = await llm_with_tools.ainvoke(
             structured_messages,
             stop=["I will", "Let me", "The user", "First,", "To answer"]
         )
     else:
-        response = await llm_with_tools.ainvoke(structured_messages)
+        # Add stop sequences for tool loop prevention on local models
+        response = await llm_with_tools.ainvoke(
+            structured_messages,
+            stop=['}, {', '}, \n{', '}]}, {"']
+        )
+
+
 
     # Use robust parser for local models
     new_content = response.content
@@ -191,16 +232,20 @@ CORE RULES:
     # Failsafe: Truncate output to remove "inner monologue" leaks or plan repetition
     if new_content:
         # 1. Handle cases where the model used tags (Robust Parsing)
-        if "</thought>" in new_content:
-            parts = new_content.split("</thought>", 1)
-            new_content = parts[-1].strip()
-            modified = True
+        for tag_end in ["</thought>", "</think>"]:
+            if tag_end in new_content:
+                parts = new_content.split(tag_end, 1)
+                new_content = parts[-1].strip()
+                modified = True
+                break
         
-        if "<thought>" in new_content and "</thought>" not in new_content:
-            new_content = new_content.split("<thought>")[0].strip()
-            modified = True
-        
-        new_content = re.sub(r'<thought>.*?</thought>', '', new_content, flags=re.DOTALL)
+        for tag_start in ["<thought>", "<think>"]:
+             if tag_start in new_content and "</" not in new_content:
+                 new_content = new_content.split(tag_start)[0].strip()
+                 modified = True
+                 break
+
+        new_content = re.sub(r'<(thought|think)>.*?</(thought|think)>', '', new_content, flags=re.DOTALL)
 
         # 2. Handle cases where the model rambles WITHOUT tags (common in GLM-4)
         monologue_patterns = [
@@ -220,6 +265,9 @@ CORE RULES:
             r"(?i)^(hello|hi|greetings|good morning|good afternoon|good evening),?\s",
             r"(?i)^i('ve| have)\s(already\s)?(found|searched|conducted|looked|received|called)",
             r"(?i)^based\son\s(the|my|your|this|information)",
+            r"(?i)^this\sis\s(a|an|the)\s",
+            r"(?i)^i\sdon't\sneed\s",
+            r"(?i)^it's\sa\s",
         ]
         
         sentences = re.split(r'(?<=[.!?])\s+', new_content)
@@ -242,19 +290,55 @@ CORE RULES:
         # Hard length limit for fast mode
         # Removed fast mode length restriction to allow detailed natural answers.
 
-    if mode != "tools_off" and not new_tool_calls and new_content:
+    if mode != "tools_off" and not new_tool_calls and "{" in new_content:
         try:
-            tool_data = parse_json_markdown(new_content)
-            if isinstance(tool_data, dict) and "name" in tool_data and "arguments" in tool_data:
-                new_tool_calls = [{
-                    "name": tool_data["name"],
-                    "args": tool_data["arguments"],
-                    "id": f"call_{len(messages)}"
-                }]
-                new_content = "" # Silence "Executing tool..." filler
-                modified = True
+             # Incremental parser for finding valid JSON object from the front
+             # Breaks repeating GLM-4 lists of dicts
+             start_idx = new_content.find("{")
+             found_data = None
+             for end_idx in range(start_idx + 10, len(new_content) + 1):
+                 try:
+                     sub_str = new_content[start_idx:end_idx]
+                     parsed = json.loads(sub_str)
+                     if isinstance(parsed, dict) and ("name" in parsed or "tool_calls" in parsed):
+                         found_data = parsed
+                         break
+                 except json.JSONDecodeError:
+                     continue
+             
+             # Fallback to standard parser if incremental failed or found nothing
+             if not found_data:
+                 try:
+                     found_data = parse_json_markdown(new_content)
+                 except Exception:
+                     pass
+
+             if isinstance(found_data, dict):
+                 # Case 1: Standard top-level Name/Arguments
+                 if "name" in found_data:
+                      args = found_data.get("arguments") or found_data.get("parameters") or found_data.get("args") or {}
+                      new_tool_calls = [{
+                          "name": found_data["name"],
+                          "args": args,
+                          "id": f"call_inc_{len(messages)}"
+                      }]
+                 # Case 2: Native Wrapped {"tool_calls": [...]}
+                 elif "tool_calls" in found_data:
+                      for tc in found_data["tool_calls"]:
+                          if isinstance(tc, dict) and "name" in tc:
+                              args = tc.get("arguments") or tc.get("parameters") or tc.get("args") or {}
+                              new_tool_calls.append({
+                                  "name": tc["name"],
+                                  "args": args,
+                                  "id": f"call_inc_{len(new_tool_calls)}_{len(messages)}"
+                              })
+                 
+                 if new_tool_calls:
+                      new_content = ""
+                      modified = True
         except Exception:
-            pass # Fallback to Qwen <tool_call> tag parsing if standard JSON fails
+             pass 
+
             
         # Also check for Qwen's native <tool_call> tags if parse_json_markdown failed
         if not new_tool_calls and "<tool_call>" in new_content:
@@ -377,13 +461,26 @@ def validate_node(state: AgentState):
 def validate_or_tools(state: AgentState):
     """Routes to tools if safe, or back to reasoning if blocked."""
     messages = state.get("messages", [])
+    
+    with open("/tmp/prompt_debug.txt", "a") as f:
+        f.write("\n>>> [Condition] validate_or_tools ENTERING\n")
+        f.write(f"Messages count: {len(messages)}\n")
+        if messages: f.write(f"Last msg type: {type(messages[-1]).__name__}\n")
+
     if messages and isinstance(messages[-1], ToolMessage):
+        with open("/tmp/prompt_debug.txt", "a") as f: f.write(">>> validate_or_tools RETURNING: reasoning (Has ToolMessage)\n")
         return "reasoning"
     
     # Use tools_condition to check for tool calls
     res = tools_condition(state)
+    
+    with open("/tmp/prompt_debug.txt", "a") as f: f.write(f">>> tools_condition returned: {res}\n")
+
     if res == END:
+        with open("/tmp/prompt_debug.txt", "a") as f: f.write(">>> validate_or_tools RETURNING: analyze_memory\n")
         return "analyze_memory"
+        
+    with open("/tmp/prompt_debug.txt", "a") as f: f.write(f">>> validate_or_tools RETURNING: {res}\n")
     return res
 
 async def summarize_history_node(state: AgentState):
@@ -407,7 +504,7 @@ async def summarize_history_node(state: AgentState):
         f"{older_messages}"
     )
     
-    summary_response = await llm.ainvoke([SystemMessage(content=summary_prompt)])
+    summary_response = await llm.ainvoke([HumanMessage(content=summary_prompt)])
     summary_message = SystemMessage(content=f"Previous Conversation Summary: {summary_response.content}")
     
     # Instruct LangGraph to remove the older messages from the state

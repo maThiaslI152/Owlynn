@@ -45,13 +45,52 @@ def read_workspace_file(filename: str) -> str:
         
     filepath = os.path.join(WORKSPACE_DIR, filename)
     if not os.path.exists(filepath):
-        return f"Error: File '{filename}' not found in workspace."
+        # Fuzzy match fallback for model typos or variations (e.g., stripped numbering)
+        try:
+            filename_only = os.path.basename(filepath)
+            all_files = os.listdir(WORKSPACE_DIR)
+            # Find files where the requested name is a substring of the real file, or vice versa
+            matches = [f for f in all_files if filename_only in f or f in filename_only]
+            if matches:
+                # Use the first best match found
+                filepath = os.path.join(WORKSPACE_DIR, matches[0])
+                print(f"[Workspace] Fuzzy matched '{filename_only}' to '{matches[0]}'")
+            else:
+                return f"Error: File '{filename}' not found in workspace."
+        except Exception:
+            return f"Error: File '{filename}' not found in workspace."
+
     
+    processed_dir = os.path.join(WORKSPACE_DIR, ".processed")
+    filename_only = os.path.basename(filepath)
+    cached_txt = os.path.join(processed_dir, filename_only + ".txt")
+    cached_md = os.path.join(processed_dir, filename_only + ".md")
+
     try:
+        # 1. Check for pre-processed cache first
+        if os.path.exists(cached_txt):
+            with open(cached_txt, 'r', encoding='utf-8') as f:
+                return f.read()
+        elif os.path.exists(cached_md):
+            with open(cached_md, 'r', encoding='utf-8') as f:
+                return f.read()
+
+        # 2. Fallback to on-the-fly processing (legacy support/race condition)
+        if filepath.lower().endswith(".pdf"):
+            import fitz
+            doc = fitz.open(filepath)
+            text = ""
+            for page in doc:
+                text += page.get_text() + "\n\n"
+            doc.close()
+            return text if text.strip() else "This PDF has no extractable text layer."
+
+        # 3. Default text reading
         with open(filepath, 'r') as f:
             return f.read()
+
     except Exception as e:
-        return f"Error reading file: {str(e)}"
+        return f"Error reading file {filename}: {str(e)}"
 
 @tool
 def write_workspace_file(filename: str, content: str) -> str:
@@ -113,6 +152,9 @@ def execute_python_code(code: str) -> str:
     """
     Executes a block of Python code directly inside the sandbox container.
     Use this for running Python scripts instead of `execute_sandboxed_shell`.
+    
+    Pre-installed libraries include: matplotlib, pandas, numpy, scipy, seaborn.
+    Any files saved by your script will appear in the workspace folder.
     """
     import uuid
     filename = f".temp_{uuid.uuid4().hex[:8]}.py"

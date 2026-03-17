@@ -16,7 +16,7 @@ _DEFAULTS = {
     "domains_of_interest": [],
     "response_style": "detailed",
     "llm_base_url": "http://127.0.0.1:8080/v1",
-    "llm_model_name": "mlx-community/Qwen2-VL-7B-Instruct-4bit"
+    "llm_model_name": "qwen/qwen3.5-9b"
 }
 
 VALID_FIELDS = {

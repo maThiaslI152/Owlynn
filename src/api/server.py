@@ -6,7 +6,7 @@ with the LangGraph agent, managing user profiles, and serving the frontend.
 It supports streaming responses and handling multimodal file uploads.
 """
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -20,16 +20,53 @@ from src.memory.user_profile import get_profile, update_profile
 from src.memory.persona import get_persona, update_persona_field
 from src.memory.memory_manager import load_memories, save_memory, delete_memory
 from src.memory.project import project_manager
+from src.config.settings import WORKSPACE_DIR
+from src.api.file_processor import start_watcher
 
 from contextlib import asynccontextmanager
 
+connected_websockets = set()
+
+def notify_file_processed(filename, status="processed"):
+    """Callback for FileWatcher background thread to broadcast over websockets."""
+    import asyncio
+    loop = getattr(app.state, "loop", None)
+    if not loop:
+        print("[Watcher] Loop not preserved, cannot notify websocket clients.")
+        return
+        
+    for ws in list(connected_websockets):
+        try:
+            coro = ws.send_json({"type": "file_status", "name": filename, "status": status})
+            asyncio.run_coroutine_threadsafe(coro, loop)
+        except Exception as e:
+            print(f"[Watcher] Failed to send ws notification: {e}")
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Preserve loop for async dispatchs from sync threads
+    app.state.loop = asyncio.get_running_loop()
+    
     # Initialize the LangGraph Agent Engine Singleton asynchronously
     app.state.agent = await init_agent()
     app.state.sessions = {} # thread_id -> GraphSession
+    
+    # Start background file watcher with WebSocket callback
+    try:
+        app.state.file_watcher = start_watcher(WORKSPACE_DIR, on_processed_callback=notify_file_processed)
+    except Exception as e:
+        print(f"[Lifespan] Failed to start file watcher: {e}")
+        app.state.file_watcher = None
+        
     yield
     # Cleanup: cancel all background tasks
+    if getattr(app.state, "file_watcher", None):
+        try:
+            app.state.file_watcher.stop()
+            app.state.file_watcher.join()
+        except Exception:
+            pass
+            
     for session in app.state.sessions.values():
         if session.task:
             session.task.cancel()
@@ -132,6 +169,198 @@ async def api_add_project_chat(project_id: str, body: dict):
     })
     return {"status": "ok"}
 
+@app.delete("/api/projects/{project_id}/chats/{chat_id}")
+async def api_delete_project_chat(project_id: str, chat_id: str):
+    project_manager.delete_chat_from_project(project_id, chat_id)
+    return {"status": "ok"}
+
+@app.put("/api/projects/{project_id}/chats/{chat_id}")
+async def api_update_project_chat(project_id: str, chat_id: str, body: dict):
+    project_manager.update_chat_in_project(project_id, chat_id, **body)
+    return {"status": "ok"}
+
+@app.get("/api/files")
+async def api_list_files(sub_path: str = ""):
+    """Returns a list of files in the workspace with processing status and folder support."""
+    try:
+        import urllib.parse
+        sub_path = urllib.parse.unquote(sub_path)
+        
+        target_dir = os.path.abspath(os.path.join(WORKSPACE_DIR, sub_path))
+        if not target_dir.startswith(os.path.abspath(WORKSPACE_DIR)):
+             return {"status": "error", "message": "Access denied"}
+             
+        files = []
+        if not os.path.exists(target_dir):
+            return []
+            
+        processed_dir = os.path.join(WORKSPACE_DIR, ".processed")
+        
+        for f in os.listdir(target_dir):
+            if f.startswith(".") or f == "__pycache__":
+                continue
+            filepath = os.path.join(target_dir, f)
+            stats = os.stat(filepath)
+            
+            # Identify if item is Folder or File
+            is_dir = os.path.isdir(filepath)
+            
+            # File extraction status cache check
+            has_cache = False
+            filename_only = f
+            if not is_dir:
+                 has_cache = os.path.exists(os.path.join(processed_dir, filename_only + ".txt")) or \
+                           os.path.exists(os.path.join(processed_dir, filename_only + ".md"))
+                           
+            files.append({
+                "name": f,
+                "size": stats.st_size if not is_dir else 0,
+                "modified": stats.st_mtime,
+                "type": "folder" if is_dir else "file",
+                "status": "processed" if has_cache else "idle" # "idle", "processing", "processed"
+            })
+        return sorted(files, key=lambda x: (x["type"] == "file", x["name"].lower()))  # Flip file kind sort folders first
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@app.get("/api/files/{filename}")
+async def api_get_file(filename: str, sub_path: str = ""):
+    """Serve/View a file from the workspace."""
+    import urllib.parse
+    filename = urllib.parse.unquote(filename)
+    sub_path = urllib.parse.unquote(sub_path)
+    
+    target_dir = os.path.abspath(os.path.join(WORKSPACE_DIR, sub_path))
+    if not target_dir.startswith(os.path.abspath(WORKSPACE_DIR)):
+         return {"status": "error", "message": "Access denied"}
+         
+    filepath = os.path.join(target_dir, filename)
+    if not os.path.exists(filepath):
+         return {"status": "error", "message": "File not found"}
+    return FileResponse(filepath)
+
+@app.delete("/api/files/{filename}")
+async def api_delete_file(filename: str, sub_path: str = ""):
+    """Deletes a file and its processed cache from the workspace."""
+    try:
+        import urllib.parse
+        filename = urllib.parse.unquote(filename)
+        sub_path = urllib.parse.unquote(sub_path)
+        
+        target_dir = os.path.abspath(os.path.join(WORKSPACE_DIR, sub_path))
+        if not target_dir.startswith(os.path.abspath(WORKSPACE_DIR)):
+             return {"status": "error", "message": "Access denied"}
+             
+        filepath = os.path.join(target_dir, filename)
+        if os.path.exists(filepath):
+            os.remove(filepath)
+            
+        # Clean up cache
+        processed_dir = os.path.join(WORKSPACE_DIR, ".processed")
+        for cache_ext in [".txt", ".md"]:
+            cache_path = os.path.join(processed_dir, filename + cache_ext)
+            if os.path.exists(cache_path):
+                os.remove(cache_path)
+                
+        # Broadcast removal to websocket
+        notify_file_processed(filename, status="deleted")
+        return {"status": "ok", "message": f"Deleted {filename}"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@app.post("/api/files/{filename}/rename")
+async def api_rename_file(filename: str, body: dict):
+    """Renames a file in the workspace."""
+    try:
+        import urllib.parse
+        filename = urllib.parse.unquote(filename)
+        new_name = body.get("new_name")
+        sub_path = urllib.parse.unquote(body.get("sub_path", ""))
+        if not new_name:
+             return {"status": "error", "message": "new_name is required"}
+             
+        target_dir = os.path.abspath(os.path.join(WORKSPACE_DIR, sub_path))
+        if not target_dir.startswith(os.path.abspath(WORKSPACE_DIR)):
+             return {"status": "error", "message": "Access denied"}
+             
+        old_path = os.path.join(target_dir, filename)
+        new_path = os.path.join(target_dir, new_name)
+        
+        if not os.path.exists(old_path):
+             return {"status": "error", "message": "File not found"}
+        if os.path.exists(new_path):
+             return {"status": "error", "message": "File with new name already exists"}
+             
+        os.rename(old_path, new_path)
+        
+        # Rename cache too
+        processed_dir = os.path.join(WORKSPACE_DIR, ".processed")
+        for cache_ext in [".txt", ".md"]:
+            old_cache = os.path.join(processed_dir, filename + cache_ext)
+            new_cache = os.path.join(processed_dir, new_name + cache_ext)
+            if os.path.exists(old_cache):
+                os.rename(old_cache, new_cache)
+                
+        notify_file_processed(filename, status="deleted") # Trigger remove on old name
+        notify_file_processed(new_name, status="processed") # Trigger add on new name
+        
+        return {"status": "ok", "message": f"Renamed {filename} to {new_name}"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@app.post("/api/upload")
+async def api_upload_file(file: UploadFile = File(...), sub_path: str = ""):
+    """Saves a file directly to the workspace bypassing the graph."""
+    try:
+        import urllib.parse
+        sub_path = urllib.parse.unquote(sub_path)
+        target_dir = os.path.abspath(os.path.join(WORKSPACE_DIR, sub_path))
+        if not target_dir.startswith(os.path.abspath(WORKSPACE_DIR)):
+             return {"status": "error", "message": "Access denied"}
+             
+        if not os.path.exists(target_dir):
+            os.makedirs(target_dir, exist_ok=True)
+            
+        filepath = os.path.join(target_dir, file.filename)
+        with open(filepath, "wb") as f:
+            f.write(await file.read())
+        return {"status": "ok", "message": f"Uploaded {file.filename}"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@app.post("/api/folders")
+async def api_create_folder(body: dict):
+    """Creates a new directory in the workspace."""
+    try:
+        import urllib.parse
+        name = body.get("name")
+        sub_path = urllib.parse.unquote(body.get("sub_path", ""))
+        if not name:
+             return {"status": "error", "message": "Folder name is required"}
+             
+        target_dir = os.path.abspath(os.path.join(WORKSPACE_DIR, sub_path, name))
+        if not target_dir.startswith(os.path.abspath(WORKSPACE_DIR)):
+             return {"status": "error", "message": "Access denied"}
+             
+        if os.path.exists(target_dir):
+             return {"status": "error", "message": "Folder already exists"}
+             
+        os.makedirs(target_dir, exist_ok=True)
+        return {"status": "ok", "message": f"Created folder {name}"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@app.delete("/api/projects/{project_id}")
+async def api_delete_project(project_id: str):
+    success = project_manager.delete_project(project_id)
+    if success:
+        return {"status": "ok"}
+    else:
+        return {"status": "error", "message": "Failed to delete project or cannot delete default project"}
+
+
 
 @app.get("/api/history/{thread_id}")
 async def api_get_history(thread_id: str):
@@ -172,7 +401,10 @@ def serialize_message(msg):
     if isinstance(msg, ToolMessage):
         serialized["tool_name"] = msg.name
         serialized["tool_call_id"] = msg.tool_call_id
-        
+        # Truncate content for UI readability/performance if too large
+        if isinstance(msg.content, str) and len(msg.content) > 500:
+            serialized["content"] = msg.content[:500] + "\n\n... [Content Truncated for UI] ..."
+            
     return serialized
 
 
@@ -232,10 +464,11 @@ class GraphSession:
             self.is_running = False
             # Final status update
             done_msg = {"type": "status", "content": "idle"}
+            print(f"[WS Debug] GraphSession._execute for thread {self.thread_id} FINISHED. Putting done_msg.")
             self.event_buffer.append(done_msg)
             for q in list(self.listeners):
                 await q.put(done_msg)
-                await q.put(None) # Sentinel to close listener loop
+
             
             # If no one is listening anymore, remove from registry
             if not self.listeners and self.thread_id in self.sessions_registry:
@@ -245,6 +478,8 @@ class GraphSession:
 @app.websocket("/ws/chat/{thread_id}")
 async def websocket_endpoint(websocket: WebSocket, thread_id: str):
     await websocket.accept()
+    connected_websockets.add(websocket) # Track connection
+    
     config = {"configurable": {"thread_id": thread_id}}
     agent = websocket.app.state.agent
     
@@ -266,19 +501,23 @@ async def websocket_endpoint(websocket: WebSocket, thread_id: str):
                 event = await q.get()
                 if event is None: # Sentinel
                     break
-                
+            
                 # Handle standard LangGraph events vs our custom wrapped events
                 if isinstance(event, dict) and "event" in event:
                     kind = event.get("event")
-                    
-                    if kind == "on_chat_model_stream":
+                    metadata = event.get("metadata", {})
+                    node = metadata.get("langgraph_node")
+                
+                    # Debug print
+                    if kind in ["on_chain_start", "on_chain_end"]:
+                        print(f"[WS Debug] Event={kind} | Node={node}")
+
+                    if kind == "on_chat_model_stream" and node == "reasoning":
                         chunk = event["data"]["chunk"]
                         if chunk.content:
                             await websocket.send_json({"type": "chunk", "content": chunk.content})
-                            
+                        
                     elif kind == "on_chain_end":
-                        metadata = event.get("metadata", {})
-                        node = metadata.get("langgraph_node")
                         if node == "reasoning":
                             output = event["data"]["output"]
                             if isinstance(output, dict) and "messages" in output:
@@ -292,16 +531,26 @@ async def websocket_endpoint(websocket: WebSocket, thread_id: str):
                                     await websocket.send_json({"type": "message", "message": serialize_message(msg)})
                 else:
                     # Our custom events (status, error, etc)
+                    print(f"[WS Debug] Custom Event: {event}")
                     await websocket.send_json(event)
         except WebSocketDisconnect:
+            print("[WS Debug] Forwarder disconnected")
             pass
         except Exception as e:
+            import traceback
             print(f"Error in event forwarder: {e}")
+            traceback.print_exc()
         finally:
             session.remove_listener(q)
-            # If session is no longer active, clean it up
+            # Guarantee the frontend returns to idle state on finish or crash
+            try:
+                await websocket.send_json({"type": "status", "content": "idle"})
+            except Exception:
+                pass
             if not session.is_active() and thread_id in sessions:
                 del sessions[thread_id]
+
+
 
     # Start the event forwarder task
     forwarder_task = asyncio.create_task(forward_events())
@@ -314,11 +563,47 @@ async def websocket_endpoint(websocket: WebSocket, thread_id: str):
             except json.JSONDecodeError:
                 continue
 
+            # Handle explicit STOP command to cancel executing GraphSession
+            if payload.get("type") == "stop":
+                sessions = websocket.app.state.sessions
+                if thread_id in sessions:
+                    session = sessions[thread_id]
+                    if session.task and not session.task.done():
+                        session.task.cancel()
+                        session.is_running = False
+                continue
+
             user_input = payload.get("message", "")
             files = payload.get("files", [])
-            message_content = build_message_content(user_input, files)
+
+            # Handle Workspace References
+            for f in files:
+                if f.get("type") == "workspace_ref":
+                    prompt_path = f.get("path")
+                    user_input += f"\n\n[Attached Workspace File: {prompt_path}]"
+
+            # Save uploaded files into the agent workspace so tools can read them
+            for f in files:
+                if f.get("type") == "workspace_ref":
+                    continue # Skip saving workspace references they already exist on disk
+                name = f.get("name")
+                data_b64 = f.get("data")
+                if name and data_b64:
+                    try:
+                        import base64
+                        raw_bytes = base64.b64decode(data_b64)
+                        filepath = os.path.join(str(WORKSPACE_DIR), name)
+                        with open(filepath, "wb") as file_out:
+                            file_out.write(raw_bytes)
+                        print(f"[Workspace] Saved file to {filepath}")
+                    except Exception as e:
+                        print(f"[Workspace] Failed to save file {name}: {e}")
+
+            message_content = await build_message_content(user_input, files)
             if not message_content:
                 continue
+
+
 
             payload_mode = payload.get("mode", "tools_on")
             project_id = payload.get("project_id", "default")
@@ -337,12 +622,13 @@ async def websocket_endpoint(websocket: WebSocket, thread_id: str):
         print(f"Client disconnected from thread: {thread_id}")
     finally:
         # We don't cancel the session task here! It continues in background.
+        connected_websockets.discard(websocket) # Remove from active list
         # But we should stop the forwarder.
         forwarder_task.cancel()
         # The forwarder cleanup will check if it should delete the session.
 
 
-def build_message_content(text: str, files: list):
+async def build_message_content(text: str, files: list):
     """
     Builds the message content block for LangChain, supporting:
     - Images: forwarded as image_url for multimodal Qwen2-VL
@@ -376,37 +662,28 @@ def build_message_content(text: str, files: list):
             })
         
         elif mime == "application/pdf" or name.lower().endswith(".pdf"):
-            # Try text extraction first with PyMuPDF
-            extracted_text = extract_pdf_text(raw_bytes)
+            print(f"[PDF] Uploaded '{name}'. Adding workspace reference.")
+            # Notify the agent the file is in the workspace and readable via tool
+            text_injections.append(f"[File: {name} uploaded to workspace. Use `read_workspace_file` tool to read it if needed.]")
             
-            if extracted_text and len(extracted_text.strip()) > 100:
-                # Good text-based PDF — inject as text block
-                text_injections.append(f"[File: {name}]\n```\n{extracted_text[:8000]}\n```")
-            else:
-                # Scanned/image-based PDF — stitch ALL pages into one composite image.
-                # Sending multiple images crashes mlx_vlm's Qwen2-VL vision tower (upstream bug),
-                # so we combine every page into a single tall JPEG instead.
-                print(f"[PDF] '{name}' has no extractable text ({len(extracted_text)} chars). Stitching pages into composite image.")
-                composite_b64 = render_pdf_as_composite(raw_bytes)
-                if composite_b64:
-                    has_multimodal = True
-                    content_parts.append({
-                        "type": "text",
-                        "text": f"[File: {name}] Scanned PDF — all pages stitched into one image below (pages separated by grey lines):"
-                    })
-                    content_parts.append({
-                        "type": "image_url",
-                        "image_url": {"url": f"data:image/jpeg;base64,{composite_b64}"}
-                    })
+            # Optional: Visual Layer only if multimodal (for backward compatibility or graphics)
+            # composite_b64 = await asyncio.to_thread(render_pdf_as_composite, raw_bytes)
+            # if composite_b64:
+            #     has_multimodal = True
+            #     content_parts.append({
+            #         "type": "text",
+            #         "text": f"[File: {name}] Visual Layout (pages stitched into one continuous image below):"
+            #     })
+            #     content_parts.append({
+            #         "type": "image_url",
+            #         "image_url": {"url": f"data:image/jpeg;base64,{composite_b64}"}
+            #     })
 
-                else:
-                    text_injections.append(f"[File: {name}]\n[ERROR: Could not extract text or render this PDF as images. It may be encrypted or malformed.]")
-        
         else:
             # Text / code file
-            extracted = extract_text_file(name, mime, raw_bytes)
-            if extracted:
-                text_injections.append(f"[File: {name}]\n```\n{extracted}\n```")
+            print(f"[File] Uploaded '{name}'. Adding workspace reference.")
+            text_injections.append(f"[File: {name} uploaded to workspace. Use `read_workspace_file` tool to read it if needed.]")
+
 
     # Build final content
     if has_multimodal:

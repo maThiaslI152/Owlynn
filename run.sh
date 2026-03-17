@@ -12,6 +12,9 @@ export PYTHONPATH=$PYTHONPATH:$(pwd)
 # Activate the virtual environment
 source .venv/bin/activate
 
+echo "Checking dependencies..."
+pip install -r requirements.txt --quiet
+
 echo "✅ Launching FastAPI backend + frontend at http://127.0.0.1:8000"
 echo ""
 echo "Open your browser and navigate to: http://127.0.0.1:8000"

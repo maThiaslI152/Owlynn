@@ -13,3 +13,8 @@ sentence-transformers
 fastapi
 uvicorn
 websockets
+watchdog
+pandas
+openpyxl
+python-docx
+tabulate

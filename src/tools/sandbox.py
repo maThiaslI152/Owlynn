@@ -15,7 +15,7 @@ class PodmanSandbox:
     Mounts the local `workspace` folder into the container so the agent can write/read files securely.
     """
     
-    def __init__(self, workspace_path: str, image: str = "python:3.11-slim"):
+    def __init__(self, workspace_path: str, image: str = "cowork-sandbox"):
         # Ensure workspace exists
         self.host_workspace = os.path.abspath(workspace_path)
         os.makedirs(self.host_workspace, exist_ok=True)

@@ -103,6 +103,46 @@ class ProjectManager:
                 self.projects[project_id]["chats"].append(chat_info)
                 self._save_projects()
 
+    def delete_chat_from_project(self, project_id: str, chat_id: str):
+        """Removes a chat from the project's list."""
+        if project_id in self.projects:
+            self.projects[project_id]["chats"] = [
+                c for c in self.projects[project_id]["chats"] if c["id"] != chat_id
+            ]
+            self._save_projects()
+
+    def update_chat_in_project(self, project_id: str, chat_id: str, **kwargs):
+        """Updates fields (e.g., name) of a chat in the project."""
+        if project_id in self.projects:
+            for chat in self.projects[project_id].get("chats", []):
+                if chat["id"] == chat_id:
+                    for k, v in kwargs.items():
+                        if k in chat:
+                            chat[k] = v
+                    break
+            self._save_projects()
+
+    def delete_project(self, project_id: str):
+        """Deletes a project and its associated workspace folder."""
+        # Do not allow deleting the default project
+        if project_id == "default":
+             return False
+             
+        if project_id in self.projects:
+            del self.projects[project_id]
+            self._save_projects()
+            
+            # Delete workspace folder
+            workspace_path = self.get_workspace_path(project_id)
+            if workspace_path.exists():
+                import shutil
+                try:
+                    shutil.rmtree(workspace_path)
+                except Exception as e:
+                    print(f"Failed to delete workspace path {workspace_path}: {e}")
+            return True
+        return False
+
     async def add_knowledge(self, project_id: str, name: str, content: str):
         """
         Adds a piece of knowledge to the project's long-term memory (ChromaDB).

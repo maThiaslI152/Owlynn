@@ -26,16 +26,17 @@ def get_mlx_openai_client(model_name=None):
     
     # Use profile values if set, otherwise fall back to arguments/defaults
     base_url = profile.get("llm_base_url", "http://127.0.0.1:8080/v1")
-    model = model_name or profile.get("llm_model_name", "mlx-community/GLM-4.6V-Flash-4bit")
+    model = model_name or profile.get("llm_model_name", "qwen/qwen3.5-9b")
 
     return ChatOpenAI(
         model=model, 
         api_key="sk-local-no-key-needed",
         base_url=base_url,
-        temperature=0.1,
+        temperature=0.4,
         max_tokens=8192,
         extra_body={"max_output_tokens": 8192}
     )
+
     
 def get_llm():
     """

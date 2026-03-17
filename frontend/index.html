@@ -57,11 +57,66 @@
             border-radius: 0.25rem;
         }
     </style>
+    <!-- On-screen Error Reporter for Debugging -->
+    <script>
+        window.onclick = function() { console.log("Window Clicked"); }
+        window.onerror = function(message, source, lineno, colno, error) {
+            const div = document.createElement('div');
+            div.style.position = 'fixed';
+            div.style.top = '0';
+            div.style.left = '0';
+            div.style.width = '100%';
+            div.style.backgroundColor = '#fee2e2';
+            div.style.color = '#ef4444';
+            div.style.padding = '10px';
+            div.style.zIndex = '9999';
+            div.style.fontSize = '12px';
+            div.style.overflow = 'auto';
+            div.style.maxHeight = '100px';
+            div.style.borderBottom = '2px solid #ef4444';
+            div.innerHTML = '<strong>JS Error:</strong> ' + message + ' <br> at ' + source + ':' + lineno;
+            document.body.appendChild(div);
+            return false;
+        };
+        const originalConsoleError = console.error;
+        console.error = function() {
+            originalConsoleError.apply(console, arguments);
+            const div = document.createElement('div');
+            div.style.position = 'fixed';
+            div.style.top = '100px';
+            div.style.left = '0';
+            div.style.width = '100%';
+            div.style.backgroundColor = '#ffedd5';
+            div.style.color = '#ea580c';
+            div.style.padding = '10px';
+            div.style.zIndex = '9998';
+            div.style.fontSize = '11px';
+            div.innerHTML = '<strong>Console.Error:</strong> ' + Array.from(arguments).join(' ');
+            document.body.appendChild(div);
+        };
+        // Resource Load Error Listener (Catches script 404s, etc)
+        window.addEventListener('error', function(e) {
+            if (e.target && e.target.tagName === 'SCRIPT') {
+                const div = document.createElement('div');
+                div.style.position = 'fixed';
+                div.style.top = '200px';
+                div.style.left = '0';
+                div.style.width = '100%';
+                div.style.backgroundColor = '#fef08a';
+                div.style.color = '#854d0e';
+                div.style.padding = '10px';
+                div.style.zIndex = '9997';
+                div.style.fontSize = '12px';
+                div.innerHTML = '<strong>Load Error:</strong> Failed to load script: ' + e.target.src;
+                document.body.appendChild(div);
+            }
+        }, true);
+    </script>
 </head>
 <body class="bg-cloud text-textdark font-sans h-screen flex overflow-hidden">
 
     <!-- Full-screen drag overlay -->
-    <div id="dragOverlay" class="hidden fixed inset-0 z-50 bg-white/80 backdrop-blur-sm flex flex-col items-center justify-center gap-4 pointer-events-none">
+    <div id="dragOverlay" class="hidden fixed inset-0 z-50 bg-white/80 backdrop-blur-sm flex-col items-center justify-center gap-4 pointer-events-none">
         <div class="border-4 border-dashed border-anthropic rounded-2xl p-16 flex flex-col items-center gap-3">
             <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="text-anthropic"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
             <p class="text-xl font-semibold text-anthropic">Drop your file here</p>
@@ -142,8 +197,31 @@
         </div>
     </aside>
 
-    <!-- Settings Modal -->
-    <div id="settingsModal" class="hidden fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+    <!-- Workspace File Viewer Modal -->
+    <div id="fileViewerModal" class="hidden fixed inset-0 bg-black/40 backdrop-blur-[2px] z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl w-full max-w-4xl h-[85vh] flex flex-col shadow-2xl overflow-hidden border border-bordercolor">
+            <div class="p-4 border-b border-bordercolor flex items-center justify-between bg-white/95">
+                <div class="flex items-center gap-2 min-w-0">
+                    <div class="p-1.5 rounded-lg bg-gray-100 text-gray-500">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                    </div>
+                    <h3 id="fileViewerTitle" class="font-semibold text-gray-800 truncate text-sm">File Name</h3>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button id="downloadFileBtn" class="p-2 rounded-lg hover:bg-gray-100 text-gray-500 hover:text-black transition-colors" title="Download">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                    </button>
+                    <button id="closeFileViewerBtn" class="p-2 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-black transition-colors">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                    </button>
+                </div>
+            </div>
+            <div id="fileViewerContent" class="flex-1 overflow-auto bg-gray-50 flex items-center justify-center relative">
+                <!-- Content will load here dynamically -->
+            </div>
+        </div>
+    </div>
+    <div id="settingsModal" class="hidden fixed inset-0 z-[60] items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden">
             <div class="p-6 border-b border-bordercolor flex items-center justify-between bg-cloud/50">
                 <h2 class="text-xl font-semibold flex items-center gap-2">
@@ -235,6 +313,70 @@
             <div class="p-6 border-t border-bordercolor bg-cloud/30 flex justify-end">
                 <button id="closeSettingsFooterBtn" class="px-6 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-300 transition-colors">Done</button>
             </div>
+        </div>
+    </div>
+
+    <!-- Custom Input Modal -->
+    <div id="customInputModal" class="hidden fixed inset-0 z-[70] items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md flex flex-col overflow-hidden">
+            <div class="p-6 border-b border-bordercolor flex items-center justify-between bg-cloud/50">
+                <h2 id="customInputTitle" class="text-xl font-semibold flex items-center gap-2">
+                    Input Required
+                </h2>
+                <button id="closeCustomInputBtn" class="text-gray-400 hover:text-black transition-colors">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+            </div>
+            
+            <div class="flex-1 p-6 space-y-4">
+                <div class="space-y-2">
+                    <label id="customInputLabel" class="text-xs font-medium text-gray-700">Name</label>
+                    <input id="customInputField" type="text" class="w-full p-2 bg-cloud border border-bordercolor rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-anthropic" placeholder="Enter value">
+                </div>
+            </div>
+            
+            <div class="p-6 border-t border-bordercolor bg-cloud/30 flex justify-end gap-3">
+                <button id="cancelCustomInputBtn" class="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-300 transition-colors">Cancel</button>
+                <button id="confirmCustomInputBtn" class="px-4 py-2 bg-anthropic text-white rounded-lg text-sm font-medium hover:opacity-90 transition-opacity">Confirm</button>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- Workspace Files Panel -->
+    <div id="workspacePanel" class="w-96 bg-white border-r border-bordercolor flex flex-col h-full relative group">
+        <!-- Resize Handle -->
+        <div id="workspaceResizeHandle" class="absolute top-0 right-0 w-1.5 h-full cursor-col-resize hover:bg-anthropic/20 active:bg-anthropic/40 z-10 transition-colors"></div>
+
+        <div class="p-4 border-b border-bordercolor flex items-center justify-between">
+            <h2 class="font-semibold text-base flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-anthropic"><path d="M4 22h14a2 2 0 0 0 2-2V7.5L14.5 2H6a2 2 0 0 0-2 2v4"/><polyline points="14 2 14 8 20 8"/><path d="M22 22v-4a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v4"/></svg>
+                Workspace
+            </h2>
+            <div class="flex items-center gap-0.5">
+                <button id="newFolderBtn" class="text-gray-400 hover:text-anthropic p-1.5 rounded-lg hover:bg-gray-100 transition-colors" title="New Folder">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/><line x1="12" y1="9" x2="12" y2="15"/><line x1="9" y1="12" x2="15" y2="12"/></svg>
+                </button>
+                <button id="uploadWorkspaceBtn" class="text-gray-400 hover:text-anthropic p-1.5 rounded-lg hover:bg-gray-100 transition-colors" title="Upload to Workspace">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                </button>
+            </div>
+            <input type="file" id="workspaceFileInput" class="hidden" multiple accept="image/*,.pdf,.py,.txt,.md,.csv,.xlsx,.docx">
+        </div>
+        
+        <!-- Breadcrumbs Toolbar -->
+        <div id="workspaceBreadcrumbs" class="px-4 py-2 bg-gray-50 border-b border-bordercolor text-[11px] text-gray-500 flex items-center gap-1 overflow-x-auto no-scrollbar">
+            <span class="cursor-pointer hover:text-black font-medium text-gray-700" id="breadcrumbRoot">Workspace</span>
+        </div>
+        
+        <div class="flex-1 overflow-y-auto p-4 space-y-2 no-scrollbar" id="workspaceFilesList">
+            <!-- Workspace files will be rendered here -->
+            <p class="text-xs text-gray-400 italic text-center py-8">Loading files...</p>
+        </div>
+        
+        <!-- Drop zone within workspace panel -->
+        <div id="workspaceDropZone" class="hidden absolute inset-0 bg-anthropic/5 backdrop-blur-[1px] flex items-center justify-center border-2 border-dashed border-anthropic m-2 rounded-xl">
+            <p class="text-xs font-semibold text-anthropic">Drop to Upload</p>
         </div>
     </div>
 
