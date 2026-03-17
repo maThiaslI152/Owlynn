@@ -31,7 +31,7 @@ def web_search(query: str, news: bool = False) -> str:
         with DDGS() as ddgs:
             if news:
                 # Use News Search for specific articles
-                for r in ddgs.news(query, max_results=5):
+                for r in ddgs.news(query, max_results=4):
                     # Standardize keys to match text search structure
                     results.append({
                         "title": r.get("title", ""),
@@ -40,11 +40,11 @@ def web_search(query: str, news: bool = False) -> str:
                     })
             else:
                 # Standard Text Search
-                for r in ddgs.text(query, max_results=5):
+                for r in ddgs.text(query, max_results=4):
                     results.append(r)
         
         if not results:
-            return f"No results found for: {query}"
+            return f"No results found for: \"{query}\". Try a different query or be less specific."
         
         lines = [f"🔍 {'News' if news else 'Web'} search results for: \"{query}\"", ""]
         for i, r in enumerate(results, 1):
@@ -100,9 +100,9 @@ def fetch_webpage(url: str) -> str:
         lines = [l for l in text.splitlines() if l.strip()]
         clean = "\n".join(lines)
         
-        # Cap at 5000 chars
-        if len(clean) > 5000:
-            clean = clean[:5000] + "\n\n... [content truncated — use fetch_webpage on a more specific URL if needed]"
+        # Cap at 4000 chars for better context window management
+        if len(clean) > 4000:
+            clean = clean[:4000] + "\n\n... [content truncated for brevity]"
         
         return f"📄 Content from {url}:\n\n{clean}"
     

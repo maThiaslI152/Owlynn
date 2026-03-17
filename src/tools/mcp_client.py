@@ -6,10 +6,42 @@ servers as native LangChain tools by establishing STDIO transports.
 """
 
 import asyncio
-from typing import List, Dict, Any
+import json
+import os
+from typing import List, Dict, Any, Optional
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
-from langchain_core.tools import tool, BaseTool
+from langchain_core.tools import BaseTool, Tool
+from pydantic import Field
+
+class MCPTool(BaseTool):
+    """
+    A LangChain tool that delegates execution to an MCP server.
+    """
+    name: str
+    description: str
+    server_name: str
+    mcp_tool_name: str
+    manager: 'MCPClientManager' = Field(exclude=True)
+
+    async def _arun(self, **kwargs) -> str:
+        return await self.manager.execute_tool(self.server_name, self.mcp_tool_name, kwargs)
+
+    def _run(self, **kwargs) -> str:
+        # Since we are in an async-first environment, we should ideally use _arun.
+        # But if sync is required, we run the event loop.
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        
+        if loop.is_running():
+            # This is tricky if already in an event loop. 
+            # In LangGraph async nodes, _arun will be called.
+            return "Error: Use async _arun"
+        
+        return loop.run_until_complete(self._arun(**kwargs))
 
 class MCPClientManager:
     """
@@ -17,66 +49,82 @@ class MCPClientManager:
     """
     
     def __init__(self):
-        # Maps server name to its session
         self.sessions: Dict[str, ClientSession] = {}
-        # Stores the native python functions wrapped as LangChain tools
         self.langchain_tools: List[BaseTool] = []
+        self._server_params: Dict[str, StdioServerParameters] = {}
+        self._initialized = False
 
-    async def _connect_stdio_server(self, server_name: str, command: str, args: List[str], env: dict = None):
-        """
-        Connects to a single MCP server via STDIO.
-        """
-        server_params = StdioServerParameters(
-            command=command,
-            args=args,
-            env=env
-        )
-
-        # In a real daemon, we would want to keep this transport open.
-        # For a simple integration script, we establish the connection and convert 
-        # the available MCP tools into LangChain BaseTools immediately.
-        
-        # NOTE: Keeping sessions alive requires async context managers,
-        # which can get complex when wiring into a synchronous LangGraph step.
-        # For now, we will just establish the patterns for tool ingestion.
-        
-        async with stdio_client(server_params) as (read, write):
-            async with ClientSession(read, write) as session:
-                await session.initialize()
-                
-                # Fetch available tools from the MCP server
-                tools_response = await session.list_tools()
-                
-                # We would typically bind these immediately to the global tool set
-                for mcp_tool in tools_response.tools:
-                    # Dynamically create a synchronous LangChain @tool wrapper that 
-                    # makes the async session call to execute the tool when invoked by the agent.
-                    
-                    # Implementation detail omitted for brevity, but this is exactly
-                    # where the bridge between MCP Tool Call and LangChain Tool Call occurs.
-                    pass
-
-    def load_mcp_servers_from_config(self, config_path: str = "mcp_config.json"):
-        """
-        Loads all configured MCP servers defined in a config file and converts 
-        them to LangChain tools that can be bound to Qwen2.5.
-        """
-        import os
-        import json
-        
+    async def initialize(self, config_path: str = "mcp_config.json"):
+        if self._initialized:
+            return
+            
         if not os.path.exists(config_path):
             print(f"No MCP config found at {config_path}. Skipping external tools.")
-            return []
-            
-        with open(config_path, "r") as f:
-            config = json.load(f)
+            self._initialized = True
+            return
+
+        try:
+            with open(config_path, "r") as f:
+                config = json.load(f)
+        except Exception as e:
+            print(f"Failed to load MCP config: {e}")
+            self._initialized = True
+            return
             
         mcp_servers = config.get("mcpServers", {})
         
         for name, details in mcp_servers.items():
-            print(f"Ingesting MCP Server: {name}")
-            # In a production setup, we would run `self._connect_stdio_server` asynchronously here.
+            command = details.get("command")
+            args = details.get("args", [])
+            env = details.get("env")
             
+            if not command:
+                continue
+                
+            params = StdioServerParameters(command=command, args=args, env=env)
+            self._server_params[name] = params
+            
+            try:
+                # We establish a session to discover tools
+                async with stdio_client(params) as (read, write):
+                    async with ClientSession(read, write) as session:
+                        await session.initialize()
+                        tools_response = await session.list_tools()
+                        
+                        for mcp_tool in tools_response.tools:
+                            lc_tool = MCPTool(
+                                name=f"{name}_{mcp_tool.name}",
+                                description=mcp_tool.description or f"Tool {mcp_tool.name} from {name} server",
+                                server_name=name,
+                                mcp_tool_name=mcp_tool.name,
+                                manager=self,
+                                args_schema=None # We could dynamically build this from inputSchema
+                            )
+                            self.langchain_tools.append(lc_tool)
+                            print(f"Loaded MCP tool: {lc_tool.name}")
+            except Exception as e:
+                print(f"Failed to connect to MCP server {name}: {e}")
+
+        self._initialized = True
+
+    async def execute_tool(self, server_name: str, tool_name: str, arguments: dict) -> str:
+        params = self._server_params.get(server_name)
+        if not params:
+            return f"Error: MCP server {server_name} not configured."
+            
+        try:
+            async with stdio_client(params) as (read, write):
+                async with ClientSession(read, write) as session:
+                    await session.initialize()
+                    result = await session.call_tool(tool_name, arguments)
+                    
+                    # MCP results can have multiple content items
+                    text_parts = [item.text for item in result.content if hasattr(item, 'text')]
+                    return "\n".join(text_parts)
+        except Exception as e:
+            return f"Error executing MCP tool {tool_name} on {server_name}: {str(e)}"
+
+    def get_tools(self) -> List[BaseTool]:
         return self.langchain_tools
 
 # Global manager instance
@@ -85,5 +133,6 @@ mcp_manager = MCPClientManager()
 def get_mcp_tools() -> List[BaseTool]:
     """
     Returns the list of dynamically ingested LangChain tools originating from MCP servers.
+    Note: Requires mcp_manager.initialize() to have been called.
     """
-    return mcp_manager.load_mcp_servers_from_config()
+    return mcp_manager.get_tools()

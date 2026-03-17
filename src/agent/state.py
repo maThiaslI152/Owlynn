@@ -9,6 +9,8 @@ import operator
 from typing import Annotated, TypedDict, Sequence, Any
 from langchain_core.messages import BaseMessage
 
+from langgraph.graph.message import add_messages
+
 class AgentState(TypedDict):
     """
     Represents the internal state of the Local Cowork Agent during execution.
@@ -16,9 +18,8 @@ class AgentState(TypedDict):
     """
     
     # The active conversation/reasoning history
-    # The `operator.add` reducer ensures new messages are appended to the list,
-    # rather than overwriting the entire list.
-    messages: Annotated[Sequence[BaseMessage], operator.add]
+    # Using `add_messages` allows handling `RemoveMessage` to delete older items.
+    messages: Annotated[Sequence[BaseMessage], add_messages]
     
     # Internal scratchpad/status that doesn't need to be kept forever in messages
     current_task: str | None
@@ -29,8 +30,11 @@ class AgentState(TypedDict):
     # Arbitrary context retrieved from VectorDB/Mem0 before reasoning
     long_term_context: str | None
     
-    # Execution mode: 'fast' or 'reasoning'
+    # Execution mode: 'tools_off' or 'tools_on'
     mode: str | None
+
+    # Project ID to associate this conversation with a specific project
+    project_id: str | None
 
     # Track if any tool execution was vetted/approved by security node
     execution_approved: bool | None

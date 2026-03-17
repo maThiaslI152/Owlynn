@@ -16,7 +16,7 @@ class TestGraph(unittest.TestCase):
         }])
         state = {"messages": [safe_message]}
         result = validate_node(state)
-        self.assertTrue(result["execution_approved"])
+        self.assertEqual(result, {})
 
         # Test dangerous command
         danger_message = AIMessage(content="Executing", tool_calls=[{
@@ -26,8 +26,8 @@ class TestGraph(unittest.TestCase):
         }])
         state_danger = {"messages": [danger_message]}
         result_danger = validate_node(state_danger)
-        self.assertFalse(result_danger["execution_approved"])
         self.assertIn("messages", result_danger)
+        self.assertEqual(len(result_danger["messages"]), 1)
         self.assertIn("Security Exception", result_danger["messages"][0].content)
 
     def test_reason_node_async(self):

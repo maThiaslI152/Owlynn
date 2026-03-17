@@ -7,6 +7,7 @@ for chatting with the agent and streaming reasoning/tool execution steps.
 
 import streamlit as st
 import uuid
+import asyncio
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 from src.agent.graph import init_agent
 
@@ -20,7 +21,14 @@ if "thread_id" not in st.session_state:
 # Initialize the LangGraph Application exactly once
 @st.cache_resource
 def get_agent():
-    return init_agent()
+    # Since init_agent is async, we use asyncio.run to initialize it synchronously 
+    # for Streamlit's cache_resource.
+    try:
+        return asyncio.run(init_agent())
+    except RuntimeError:
+        # Fallback for when an event loop is already running
+        loop = asyncio.get_event_loop()
+        return loop.run_until_complete(init_agent())
 
 app = get_agent()
 

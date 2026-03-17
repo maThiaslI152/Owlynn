@@ -3,7 +3,8 @@ let currentSessionId = generateUUID();
 let socket = null;
 let isReasoning = false;
 let pendingFiles = []; // { name, type, data (base64), preview? }
-let activeMode = 'reasoning'; // default: 'fast' or 'reasoning'
+let activeMode = 'tools_on'; // default: 'tools_on' or 'tools_off'
+let activeProjectId = 'default';
 let activeAiMessage = null; 
 let lastHumanMessage = ""; // For regenerate
 
@@ -25,7 +26,18 @@ const fileInput = document.getElementById('fileInput');
 const attachBtn = document.getElementById('attachBtn');
 const modeFastBtn = document.getElementById('modeFastBtn');
 const modeReasoningBtn = document.getElementById('modeReasoningBtn');
+const projectsListEl = document.getElementById('projectsList');
+const addProjectBtn = document.getElementById('addProjectBtn');
+const projectKnowledgeSection = document.getElementById('projectKnowledgeSection');
+const projectFilesList = document.getElementById('projectFilesList');
+const projectChatsSection = document.getElementById('projectChatsSection');
+const projectChatsList = document.getElementById('projectChatsList');
 
+// Settings Modal DOM Elements
+const settingsModal = document.getElementById('settingsModal');
+const openSettingsBtn = document.getElementById('openSettingsBtn');
+const closeSettingsBtn = document.getElementById('closeSettingsBtn');
+const closeSettingsFooterBtn = document.getElementById('closeSettingsFooterBtn');
 
 // Sidebar DOM Elements
 const profileNameInput = document.getElementById('profileName');
@@ -43,12 +55,17 @@ const agentNameDisplay = document.getElementById('agentNameDisplay');
 const agentRoleDisplay = document.getElementById('agentRoleDisplay');
 const memoriesCountEl = document.getElementById('memoriesCount');
 
+const newMemoryInput = document.getElementById('newMemoryInput');
+const addMemoryBtn = document.getElementById('addMemoryBtn');
+const memoriesListEl = document.getElementById('memoriesList');
+
 // Initialize
 sessionIdEl.value = currentSessionId;
 connectWebSocket();
-loadSidebarData();
+loadSettingsData();
+loadProjects();
 
-async function loadSidebarData() {
+async function loadSettingsData() {
     try {
         const [profileRes, personaRes, memoriesRes] = await Promise.all([
             fetch('/api/profile'),
@@ -76,15 +93,299 @@ async function loadSidebarData() {
         `;
         if (agentRoleDisplay) agentRoleDisplay.innerText = persona.role || '';
 
-        // Populate Memories Count
+        // Populate Memories
         if (memoriesCountEl) memoriesCountEl.innerText = memories.length || 0;
+        renderMemories(memories);
 
     } catch (e) {
-        console.error('Failed to load sidebar data:', e);
+        console.error('Failed to load settings data:', e);
     }
 }
 
+function renderMemories(memories) {
+    if (!memoriesListEl) return;
+    memoriesListEl.innerHTML = '';
+    
+    if (memories.length === 0) {
+        memoriesListEl.innerHTML = '<p class="text-xs text-gray-400 italic text-center py-4">No memories stored yet.</p>';
+        return;
+    }
+    
+    memories.forEach(m => {
+        const item = document.createElement('div');
+        item.className = 'flex items-center justify-between gap-3 p-3 bg-cloud border border-bordercolor rounded-xl text-sm group hover:border-anthropic/30 transition-colors';
+        
+        item.innerHTML = `
+            <div class="flex-1">
+                <p class="text-textdark font-medium">${m.fact}</p>
+                <p class="text-[10px] text-gray-400 mt-1">${new Date(m.timestamp).toLocaleString()}</p>
+            </div>
+            <button class="delete-memory-btn p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-all opacity-0 group-hover:opacity-100" title="Delete Memory">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+            </button>
+        `;
+        
+        item.querySelector('.delete-memory-btn').onclick = () => deleteMemory(m.fact);
+        memoriesListEl.appendChild(item);
+    });
+}
+
+async function deleteMemory(fact) {
+    if (!confirm(`Forget this memory: "${fact}"?`)) return;
+    
+    try {
+        const res = await fetch('/api/memories', {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fact })
+        });
+        const data = await res.json();
+        if (data.status === 'ok') {
+            if (memoriesCountEl) memoriesCountEl.innerText = data.memories.length;
+            renderMemories(data.memories);
+        }
+    } catch (e) {
+        console.error('Failed to delete memory:', e);
+    }
+}
+
+addMemoryBtn?.addEventListener('click', async () => {
+    const fact = newMemoryInput.value.trim();
+    if (!fact) return;
+    
+    try {
+        const res = await fetch('/api/memories', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fact })
+        });
+        const data = await res.json();
+        if (data.status === 'ok') {
+            newMemoryInput.value = '';
+            if (memoriesCountEl) memoriesCountEl.innerText = data.memories.length;
+            renderMemories(data.memories);
+        }
+    } catch (e) {
+        console.error('Failed to add memory:', e);
+    }
+});
+
+async function loadProjects() {
+    try {
+        const res = await fetch('/api/projects');
+        const projects = await res.json();
+        renderProjects(projects);
+        
+        // Load active project details
+        const activeProject = projects.find(p => p.id === activeProjectId) || projects[0];
+        if (activeProject) {
+            switchProject(activeProject.id, false);
+        }
+    } catch (e) {
+        console.error('Failed to load projects:', e);
+    }
+}
+
+function renderProjects(projects) {
+    if (!projectsListEl) return;
+    projectsListEl.innerHTML = '';
+    
+    projects.forEach(project => {
+        const isActive = project.id === activeProjectId;
+        const item = document.createElement('div');
+        item.className = `group flex items-center gap-2 px-2 py-1.5 rounded-md text-sm cursor-pointer transition-colors ${
+            isActive ? 'bg-white border border-anthropic/20 shadow-sm' : 'hover:bg-gray-100 text-gray-600'
+        }`;
+        
+        item.innerHTML = `
+            <span class="w-2 h-2 rounded-full ${isActive ? 'bg-anthropic' : 'bg-gray-300'}"></span>
+            <span class="truncate ${isActive ? 'font-medium text-textdark' : ''}">${project.name}</span>
+        `;
+        
+        item.onclick = () => switchProject(project.id);
+        projectsListEl.appendChild(item);
+    });
+}
+
+async function switchProject(projectId, resetChat = true) {
+    activeProjectId = projectId;
+    
+    try {
+        const res = await fetch(`/api/projects/${projectId}`);
+        const project = await res.json();
+        
+        // Update UI
+        if (projectKnowledgeSection) {
+            projectKnowledgeSection.classList.toggle('hidden', !project.files || project.files.length === 0);
+        }
+        renderProjectFiles(project.files || []);
+        
+        // Render project chats
+        if (projectChatsSection) {
+            projectChatsSection.classList.toggle('hidden', !project.chats || project.chats.length === 0);
+        }
+        renderProjectChats(project.chats || []);
+        
+        // Reload projects list to update active state
+        const allRes = await fetch('/api/projects');
+        const allProjects = await allRes.json();
+        renderProjects(allProjects);
+        
+        if (resetChat) {
+            // Reset reasoning state
+            updateAgentStatus('idle');
+            
+            // Load project-specific session ID
+            const savedSessionId = localStorage.getItem(`project_session_${projectId}`);
+            if (savedSessionId) {
+                currentSessionId = savedSessionId;
+                sessionIdEl.value = currentSessionId;
+                await loadChatHistory(currentSessionId);
+                
+                // Reconnect WebSocket to the correct thread
+                if (socket) {
+                    socket.onclose = null; // Prevent auto-reconnect
+                    socket.close();
+                }
+                connectWebSocket();
+            } else {
+                // No saved session, start new one
+                newChatBtn.click();
+            }
+        }
+    } catch (e) {
+        console.error('Failed to switch project:', e);
+    }
+}
+
+async function loadChatHistory(sessionId) {
+    messagesArea.innerHTML = '';
+    activeAiMessage = null;
+    
+    try {
+        const res = await fetch(`/api/history/${sessionId}`);
+        const history = await res.json();
+        
+        if (history.length === 0) {
+            renderMessage({ type: 'ai', content: 'Chat started. How can I help you today?' });
+            return;
+        }
+        
+        history.forEach(msg => {
+            renderMessage(msg);
+        });
+        
+        // Scroll to bottom
+        messagesArea.scrollTop = messagesArea.scrollHeight;
+    } catch (e) {
+        console.error('Failed to load history:', e);
+        renderMessage({ type: 'ai', content: 'Chat started. How can I help you today?' });
+    }
+}
+
+function renderProjectFiles(files) {
+    if (!projectFilesList) return;
+    projectFilesList.innerHTML = '';
+    
+    files.forEach(file => {
+        const item = document.createElement('div');
+        item.className = 'flex items-center gap-2 p-2 bg-white border border-bordercolor rounded text-xs';
+        item.innerHTML = `
+            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-gray-400"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            <span class="truncate flex-1">${file.name}</span>
+        `;
+        projectFilesList.appendChild(item);
+    });
+}
+
+function renderProjectChats(chats) {
+    if (!projectChatsList) return;
+    projectChatsList.innerHTML = '';
+    
+    // Sort chats by created_at descending (newest first)
+    const sortedChats = [...chats].sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
+    
+    sortedChats.forEach(chat => {
+        const isActive = chat.id === currentSessionId;
+        const item = document.createElement('div');
+        item.className = `flex items-center gap-2 p-2 rounded text-xs cursor-pointer transition-colors ${
+            isActive ? 'bg-anthropic text-white' : 'bg-white border border-bordercolor hover:bg-gray-50'
+        }`;
+        
+        const date = chat.created_at ? new Date(chat.created_at * 1000).toLocaleDateString() : 'Unknown';
+        
+        item.innerHTML = `
+            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${isActive ? 3 : 2}" stroke-linecap="round" stroke-linejoin="round" class="${isActive ? 'text-white' : 'text-gray-400'}"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            <span class="truncate flex-1 font-medium">${chat.name || 'Chat'}</span>
+            <span class="opacity-60 text-[10px]">${date}</span>
+        `;
+        
+        item.onclick = () => switchChat(chat.id);
+        projectChatsList.appendChild(item);
+    });
+}
+
+async function switchChat(sessionId) {
+    currentSessionId = sessionId;
+    sessionIdEl.value = currentSessionId;
+    
+    // Update mapping in localStorage
+    if (activeProjectId) {
+        localStorage.setItem(`project_session_${activeProjectId}`, currentSessionId);
+    }
+    
+    // Reload UI
+    await loadChatHistory(sessionId);
+    
+    // Reconnect WebSocket to the correct thread
+    if (socket) {
+        socket.onclose = null; 
+        socket.close();
+    }
+    connectWebSocket();
+    
+    // Refresh project details to update active chat highlighting
+    const res = await fetch(`/api/projects/${activeProjectId}`);
+    const project = await res.json();
+    renderProjectChats(project.chats || []);
+}
+
+addProjectBtn?.addEventListener('click', async () => {
+    const name = prompt('Project Name:');
+    if (!name) return;
+    
+    const instructions = prompt('Project Instructions (optional):');
+    
+    try {
+        const res = await fetch('/api/projects', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, instructions })
+        });
+        const newProject = await res.json();
+        await loadProjects();
+        switchProject(newProject.id);
+    } catch (e) {
+        console.error('Failed to create project:', e);
+    }
+});
+
 // ─── Event Listeners ────────────────────────────────────────────────────────
+
+openSettingsBtn?.addEventListener('click', () => {
+    settingsModal.classList.remove('hidden');
+    loadSettingsData();
+});
+
+closeSettingsBtn?.addEventListener('click', () => settingsModal.classList.add('hidden'));
+closeSettingsFooterBtn?.addEventListener('click', () => settingsModal.classList.add('hidden'));
+
+// Close modal when clicking outside content
+settingsModal?.addEventListener('click', (e) => {
+    if (e.target === settingsModal) {
+        settingsModal.classList.add('hidden');
+    }
+});
 
 saveProfileBtn?.addEventListener('click', async () => {
     const data = {
@@ -141,29 +442,63 @@ messageInput.addEventListener('input', function() {
     this.style.height = (this.scrollHeight) + 'px';
 });
 
-newChatBtn.addEventListener('click', () => {
+newChatBtn.addEventListener('click', async () => {
+    // Reset reasoning state
+    updateAgentStatus('idle');
+    
     currentSessionId = generateUUID();
     sessionIdEl.value = currentSessionId;
     messagesArea.innerHTML = '';
     pendingFiles = [];
     renderPreviews();
-    if (socket) socket.close();
+    
+    const chatName = prompt('Enter a name for this chat (optional):', 'New Chat') || 'New Chat';
+    
+    // Save mapping to localStorage
+    if (activeProjectId) {
+        localStorage.setItem(`project_session_${activeProjectId}`, currentSessionId);
+        
+        // Register chat with project in backend
+        try {
+            await fetch(`/api/projects/${activeProjectId}/chats`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: currentSessionId, name: chatName })
+            });
+            
+            // Refresh project details to show new chat in list
+            const res = await fetch(`/api/projects/${activeProjectId}`);
+            const project = await res.json();
+            if (projectChatsSection) projectChatsSection.classList.remove('hidden');
+            renderProjectChats(project.chats || []);
+        } catch (e) {
+            console.error('Failed to register chat with project:', e);
+        }
+    }
+    
+    if (socket) {
+        socket.onclose = null; // Prevent auto-reconnect
+        socket.close();
+    }
     connectWebSocket();
+    
+    // Welcome message
+    renderMessage({ type: 'ai', content: `**${chatName}** started. How can I help you in the workspace today?` });
 });
 
 // Mode Toggle Listeners
 modeFastBtn?.addEventListener('click', () => {
-    activeMode = 'fast';
+    activeMode = 'tools_off';
     updateModeUI();
 });
 
 modeReasoningBtn?.addEventListener('click', () => {
-    activeMode = 'reasoning';
+    activeMode = 'tools_on';
     updateModeUI();
 });
 
 function updateModeUI() {
-    if (activeMode === 'fast') {
+    if (activeMode === 'tools_off') {
         modeFastBtn.className = 'px-3 py-1 font-medium bg-anthropic text-white transition-colors';
         modeReasoningBtn.className = 'px-3 py-1 font-medium text-gray-500 hover:bg-gray-50 transition-colors';
     } else {
@@ -239,6 +574,17 @@ function connectWebSocket() {
 }
 
 // UI Updaters
+function quickAction(text) {
+    if (!messageInput || !chatForm) return;
+    messageInput.value = text;
+    // Trigger input event to resize textarea
+    messageInput.dispatchEvent(new Event('input'));
+    // Small delay to ensure resize finished
+    setTimeout(() => {
+        chatForm.dispatchEvent(new Event('submit'));
+    }, 10);
+}
+
 function updateConnectionStatus(status) {
     if (status === 'connected') {
         statusDot.className = 'w-2 h-2 rounded-full bg-green-500';
@@ -344,22 +690,30 @@ function renderPreviews() {
 
 function handleChunk(chunkText) {
     if (!activeAiMessage) {
-        const wrapper = document.createElement('div');
-        wrapper.className = 'flex gap-4';
+        const lastWrapper = messagesArea.lastElementChild;
+        let wrapper, contentDiv;
         
-        const avatar = document.createElement('div');
-        avatar.className = 'w-8 h-8 rounded shrink-0 bg-anthropic flex items-center justify-center text-white mt-1';
-        avatar.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect x="4" y="8" width="16" height="12" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>';
-        wrapper.appendChild(avatar);
-        
-        const contentDiv = document.createElement('div');
-        contentDiv.className = 'flex-1 message-content text-base text-textdark leading-relaxed';
-        wrapper.appendChild(contentDiv);
+        if (lastWrapper && lastWrapper.dataset.sender === 'agent') {
+            wrapper = lastWrapper;
+            contentDiv = wrapper.querySelector('.message-content');
+        } else {
+            wrapper = document.createElement('div');
+            wrapper.className = 'flex gap-4 group-msg mb-6';
+            wrapper.dataset.sender = 'agent';
+            
+            const avatar = document.createElement('div');
+            avatar.className = 'w-8 h-8 rounded shrink-0 bg-anthropic flex items-center justify-center text-white mt-1';
+            avatar.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect x="4" y="8" width="16" height="12" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>';
+            wrapper.appendChild(avatar);
+            
+            contentDiv = document.createElement('div');
+            contentDiv.className = 'flex-1 message-content text-base text-textdark leading-relaxed space-y-4';
+            wrapper.appendChild(contentDiv);
+            messagesArea.appendChild(wrapper);
+        }
         
         const mainContainer = document.createElement('div');
         contentDiv.appendChild(mainContainer);
-        
-        messagesArea.appendChild(wrapper);
         
         activeAiMessage = {
             wrapper: wrapper,
@@ -568,7 +922,8 @@ function handleSend(e) {
     socket.send(JSON.stringify({ 
         message: text, 
         files: pendingFiles.map(f => ({ name: f.name, type: f.type, data: f.data })),
-        mode: activeMode 
+        mode: activeMode,
+        project_id: activeProjectId
     }));
 
     
@@ -582,7 +937,8 @@ function handleSend(e) {
 
 function renderUserMessage(text, files = []) {
     const wrapper = document.createElement('div');
-    wrapper.className = 'flex justify-end';
+    wrapper.className = 'flex justify-end mb-6';
+    wrapper.dataset.sender = 'human';
     
     const inner = document.createElement('div');
     inner.className = 'flex flex-col items-end gap-2 max-w-[85%]';
@@ -613,7 +969,13 @@ function renderUserMessage(text, files = []) {
         bubble.className = 'bg-userbubble text-textdark px-5 py-3 rounded-2xl text-base relative group';
         
         const textSpan = document.createElement('span');
-        textSpan.textContent = text;
+        if (typeof text === 'string') {
+            textSpan.textContent = text;
+        } else if (Array.isArray(text)) {
+            // Find the text part in multimodal content
+            const textPart = text.find(p => p.type === 'text');
+            textSpan.textContent = textPart ? textPart.text : '[Multimodal Content]';
+        }
         
         const editBtn = document.createElement('button');
         editBtn.className = 'absolute -left-6 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 hover:text-black';
@@ -687,49 +1049,71 @@ function renderUserMessage(text, files = []) {
 }
 
 function renderMessage(msg) {
+    if (msg.type === 'human') {
+        renderUserMessage(msg.content);
+        return;
+    }
+
     // Guard up-front: skip messages with no useful content at all
     const hasContent = msg.content && msg.content.trim();
     const hasToolCalls = msg.tool_calls && msg.tool_calls.length > 0;
     if (msg.type === 'ai' && !hasContent && !hasToolCalls) return;
     if (msg.type === 'tool' && !msg.content) return;
 
-    const wrapper = document.createElement('div');
-    wrapper.className = 'flex gap-4';
-    
-    // Avatar
-    const avatar = document.createElement('div');
-    avatar.className = 'w-8 h-8 rounded shrink-0 bg-anthropic flex items-center justify-center text-white mt-1';
-    avatar.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect x="4" y="8" width="16" height="12" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>';
-    wrapper.appendChild(avatar);
-    
-    // Content Container
-    const content = document.createElement('div');
-    content.className = 'flex-1 message-content text-base text-textdark leading-relaxed';
-    
-    if (msg.type === 'ai') {
-        if (hasContent) {
-            const textDiv = document.createElement('div');
-            // Strip any residual ```json ... ``` fences that the agent left behind
-            // after the tool call was extracted. These would otherwise render as dark code blocks.
-            const sanitized = msg.content
-                .replace(/```(?:json)?\s*\{[^}]*\}\s*```/gs, '') // remove whole JSON fence blocks
-                .replace(/```(?:json)?\s*```/g, '')               // remove empty fence remnants
-                .trim();
-            if (sanitized) {
-                textDiv.innerHTML = marked.parse(sanitized);
-                content.appendChild(textDiv);
-            }
-        }
+    // --- Message Grouping Logic ---
+    // We group AI messages and Tool results into the same visual block if they are consecutive.
+    const lastWrapper = messagesArea.lastElementChild;
+    let contentContainer = null;
+    let isNewGroup = true;
+
+    if (lastWrapper && lastWrapper.dataset.sender === 'agent' && (msg.type === 'ai' || msg.type === 'tool')) {
+        contentContainer = lastWrapper.querySelector('.message-content');
+        isNewGroup = false;
+    }
+
+    if (isNewGroup) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'flex gap-4 group-msg mb-6';
+        wrapper.dataset.sender = (msg.type === 'ai' || msg.type === 'tool') ? 'agent' : 'human';
+
+        // Avatar
+        const avatar = document.createElement('div');
+        avatar.className = 'w-8 h-8 rounded shrink-0 bg-anthropic flex items-center justify-center text-white mt-1';
+        avatar.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect x="4" y="8" width="16" height="12" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>';
+        wrapper.appendChild(avatar);
+
+        // Content Container
+        contentContainer = document.createElement('div');
+        contentContainer.className = 'flex-1 message-content text-base text-textdark leading-relaxed space-y-4';
+        wrapper.appendChild(contentContainer);
         
-        // Render Tool Calls
+        messagesArea.appendChild(wrapper);
+    }
+
+    // --- Content Rendering ---
+    if (msg.type === 'ai') {
+        // Reorder: Tool calls ABOVE content if both exist
         if (hasToolCalls) {
             msg.tool_calls.forEach(tc => {
                 const toolDiv = createToolCallUI(tc);
-                content.appendChild(toolDiv);
+                contentContainer.appendChild(toolDiv);
             });
         }
+
+        if (hasContent) {
+            const textDiv = document.createElement('div');
+            // Strip any residual ```json ... ``` fences
+            const sanitized = msg.content
+                .replace(/```(?:json)?\s*\{[^}]*\}\s*```/gs, '')
+                .replace(/```(?:json)?\s*```/g, '')
+                .trim();
+            if (sanitized) {
+                textDiv.innerHTML = marked.parse(sanitized);
+                contentContainer.appendChild(textDiv);
+            }
+        }
     } else if (msg.type === 'tool') {
-        // Tool Result - Create collapsible structure
+        // Tool Result
         const container = document.createElement('div');
         container.className = 'mt-2 border border-bordercolor rounded-lg overflow-hidden max-w-2xl';
         
@@ -770,15 +1154,10 @@ function renderMessage(msg) {
             arrow.querySelector('svg').classList.toggle('rotate-180', isExpanded);
         });
         
-        content.appendChild(container);
+        contentContainer.appendChild(container);
     }
     
-    // Only append if there's actual content
-    if (content.childNodes.length > 0) {
-        wrapper.appendChild(content);
-        messagesArea.appendChild(wrapper);
-        scrollToBottom();
-    }
+    scrollToBottom();
 }
 
 function createToolCallUI(tc) {

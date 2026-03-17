@@ -18,7 +18,8 @@ from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 from src.agent.graph import init_agent
 from src.memory.user_profile import get_profile, update_profile
 from src.memory.persona import get_persona, update_persona_field
-from src.memory.memory_manager import load_memories
+from src.memory.memory_manager import load_memories, save_memory, delete_memory
+from src.memory.project import project_manager
 
 from contextlib import asynccontextmanager
 
@@ -26,7 +27,12 @@ from contextlib import asynccontextmanager
 async def lifespan(app: FastAPI):
     # Initialize the LangGraph Agent Engine Singleton asynchronously
     app.state.agent = await init_agent()
+    app.state.sessions = {} # thread_id -> GraphSession
     yield
+    # Cleanup: cancel all background tasks
+    for session in app.state.sessions.values():
+        if session.task:
+            session.task.cancel()
 
 app = FastAPI(title="Local Cowork Agent API", lifespan=lifespan)
 
@@ -85,6 +91,73 @@ async def api_update_persona(body: dict):
 async def api_get_memories():
     return load_memories()
 
+@app.post("/api/memories")
+async def api_add_memory(body: dict):
+    fact = body.get("fact")
+    if not fact:
+        return {"status": "error", "message": "Fact required"}
+    result = save_memory(fact)
+    return {"status": "ok", "message": result, "memories": load_memories()}
+
+@app.delete("/api/memories")
+async def api_delete_memory(body: dict):
+    fact = body.get("fact")
+    if not fact:
+        return {"status": "error", "message": "Fact required"}
+    success = delete_memory(fact)
+    return {"status": "ok" if success else "error", "memories": load_memories()}
+
+@app.get("/api/projects")
+async def api_list_projects():
+    return project_manager.list_projects()
+
+@app.post("/api/projects")
+async def api_create_project(body: dict):
+    name = body.get("name", "New Project")
+    instructions = body.get("instructions")
+    return project_manager.create_project(name, instructions)
+
+@app.get("/api/projects/{project_id}")
+async def api_get_project(project_id: str):
+    return project_manager.get_project(project_id)
+
+@app.post("/api/projects/{project_id}/chats")
+async def api_add_project_chat(project_id: str, body: dict):
+    # body: {id, name}
+    import time
+    project_manager.add_chat_to_project(project_id, {
+        "id": body["id"],
+        "name": body.get("name", "New Chat"),
+        "created_at": time.time()
+    })
+    return {"status": "ok"}
+
+
+@app.get("/api/history/{thread_id}")
+async def api_get_history(thread_id: str):
+    """Retrieves full chat history for a specific thread from Redis."""
+    try:
+        agent = app.state.agent
+        if not agent:
+            return []
+            
+        config = {"configurable": {"thread_id": thread_id}}
+        state = await agent.aget_state(config)
+        
+        if not state or not state.values:
+            return []
+            
+        messages = state.values.get("messages", [])
+        return [serialize_message(m) for m in messages]
+    except Exception as e:
+        print(f"Failed to fetch history: {e}")
+        return []
+
+
+@app.put("/api/projects/{project_id}")
+async def api_update_project(project_id: str, body: dict):
+    return project_manager.update_project(project_id, **body)
+
 
 def serialize_message(msg):
     """
@@ -102,103 +175,171 @@ def serialize_message(msg):
         
     return serialized
 
+
+class GraphSession:
+    """Manages the graph execution for a specific thread in a background task."""
+    def __init__(self, thread_id, agent, sessions_registry):
+        self.thread_id = thread_id
+        self.agent = agent
+        self.sessions_registry = sessions_registry
+        self.listeners = set() # asyncio.Queues
+        self.task = None
+        self.event_buffer = [] # Store all events for the current turn
+        self.is_running = False
+
+    async def add_listener(self):
+        q = asyncio.Queue()
+        self.listeners.add(q)
+        # Replay all events of the current turn to catch up
+        for event in self.event_buffer:
+            await q.put(event)
+        return q
+
+    def remove_listener(self, q: asyncio.Queue):
+        self.listeners.discard(q)
+
+    def is_active(self):
+        return self.is_running or len(self.listeners) > 0
+
+    async def start_run(self, input_data, config):
+        if self.is_running:
+            return
+        self.event_buffer = []
+        self.is_running = True
+        self.task = asyncio.create_task(self._execute(input_data, config))
+
+    async def _execute(self, input_data, config):
+        try:
+            # Initial status
+            start_msg = {"type": "status", "content": "reasoning"}
+            self.event_buffer.append(start_msg)
+            for q in list(self.listeners):
+                await q.put(start_msg)
+
+            async for event in self.agent.astream_events(input_data, config=config, version="v2"):
+                self.event_buffer.append(event)
+                # Broadcast
+                for q in list(self.listeners):
+                    await q.put(event)
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            err_msg = {"type": "error", "content": f"Graph Execution Error: {str(e)}"}
+            self.event_buffer.append(err_msg)
+            for q in list(self.listeners):
+                await q.put(err_msg)
+        finally:
+            self.is_running = False
+            # Final status update
+            done_msg = {"type": "status", "content": "idle"}
+            self.event_buffer.append(done_msg)
+            for q in list(self.listeners):
+                await q.put(done_msg)
+                await q.put(None) # Sentinel to close listener loop
+            
+            # If no one is listening anymore, remove from registry
+            if not self.listeners and self.thread_id in self.sessions_registry:
+                del self.sessions_registry[self.thread_id]
+
+
 @app.websocket("/ws/chat/{thread_id}")
 async def websocket_endpoint(websocket: WebSocket, thread_id: str):
     await websocket.accept()
     config = {"configurable": {"thread_id": thread_id}}
+    agent = websocket.app.state.agent
     
+    if not agent:
+        await websocket.close(code=1008, reason="Agent not initialized")
+        return
+
+    # Get or create session
+    sessions = websocket.app.state.sessions
+    if thread_id not in sessions:
+        sessions[thread_id] = GraphSession(thread_id, agent, sessions)
+    session = sessions[thread_id]
+
+    # Task to listen to the session events and send them to the websocket
+    async def forward_events():
+        q = await session.add_listener()
+        try:
+            while True:
+                event = await q.get()
+                if event is None: # Sentinel
+                    break
+                
+                # Handle standard LangGraph events vs our custom wrapped events
+                if isinstance(event, dict) and "event" in event:
+                    kind = event.get("event")
+                    
+                    if kind == "on_chat_model_stream":
+                        chunk = event["data"]["chunk"]
+                        if chunk.content:
+                            await websocket.send_json({"type": "chunk", "content": chunk.content})
+                            
+                    elif kind == "on_chain_end":
+                        metadata = event.get("metadata", {})
+                        node = metadata.get("langgraph_node")
+                        if node == "reasoning":
+                            output = event["data"]["output"]
+                            if isinstance(output, dict) and "messages" in output:
+                                msg = output["messages"][0]
+                                if getattr(msg, "tool_calls", None):
+                                    await websocket.send_json({"type": "message", "message": serialize_message(msg)})
+                        elif node == "tools" or metadata.get("langgraph_step") == "tools":
+                            output = event["data"]["output"]
+                            if isinstance(output, dict) and "messages" in output:
+                                for msg in output["messages"]:
+                                    await websocket.send_json({"type": "message", "message": serialize_message(msg)})
+                else:
+                    # Our custom events (status, error, etc)
+                    await websocket.send_json(event)
+        except WebSocketDisconnect:
+            pass
+        except Exception as e:
+            print(f"Error in event forwarder: {e}")
+        finally:
+            session.remove_listener(q)
+            # If session is no longer active, clean it up
+            if not session.is_active() and thread_id in sessions:
+                del sessions[thread_id]
+
+    # Start the event forwarder task
+    forwarder_task = asyncio.create_task(forward_events())
+
     try:
         while True:
             data = await websocket.receive_text()
-            
             try:
                 payload = json.loads(data)
             except json.JSONDecodeError:
                 continue
 
             user_input = payload.get("message", "")
-            files = payload.get("files", [])  # list of {name, type, data (base64)}
-
-            # Build the message content — may be multimodal if image files attached
+            files = payload.get("files", [])
             message_content = build_message_content(user_input, files)
             if not message_content:
                 continue
 
-            await websocket.send_json({"type": "status", "content": "reasoning"})
-            
-            try:
-                agent = websocket.app.state.agent
-                if not agent:
-                     raise Exception("Agent not initialized")
-                     
-                payload_mode = payload.get("mode", "reasoning")
+            payload_mode = payload.get("mode", "tools_on")
+            project_id = payload.get("project_id", "default")
 
-                # Use astream_events for token streaming and node updates
-                async for event in agent.astream_events(
-                    {
-                        "messages": [HumanMessage(content=message_content)],
-                        "mode": payload_mode
-                    },
-                    config=config,
-                    version="v2"
-                ):
-                    kind = event.get("event")
-                    
-                    if kind == "on_chat_model_stream":
-                        # Stream tokens in real-time
-                        chunk = event["data"]["chunk"]
-                        if chunk.content:
-                            await websocket.send_json({
-                                "type": "chunk",
-                                "content": chunk.content
-                            })
-                            
-                    elif kind == "on_chain_end":
-                        # Node or chain finished
-                        metadata = event.get("metadata", {})
-                        node = metadata.get("langgraph_node")
-                        
-                        if node == "reasoning":
-                            output = event["data"]["output"]
-                            if isinstance(output, dict) and "messages" in output:
-                                msg = output["messages"][0]
-                                # Only send full message if it has tool calls (streaming covers text)
-                                if getattr(msg, "tool_calls", None):
-                                    await websocket.send_json({
-                                        "type": "message",
-                                        "message": serialize_message(msg)
-                                    })
-                        elif node == "tools" or metadata.get("langgraph_step") == "tools":
-                            output = event["data"]["output"]
-                            if isinstance(output, dict) and "messages" in output:
-                                for msg in output["messages"]:
-                                    await websocket.send_json({
-                                        "type": "message",
-                                        "message": serialize_message(msg)
-                                    })
-
-                await websocket.send_json({"type": "status", "content": "idle"})
-
-            except Exception as e:
-                import traceback
-                print(f"--- GRAPH EXECUTION ERROR: {e} ---")
-                traceback.print_exc()
-                
-                # Write to log file for easy reading
-                try:
-                    with open("/Users/tim/Documents/Owlynn/graph_error.log", "w") as f:
-                        f.write(f"Error: {e}\n")
-                        f.write(traceback.format_exc())
-                except Exception as log_err:
-                    print(f"Failed to write log file: {log_err}")
-                    
-                await websocket.send_json({
-                    "type": "error",
-                    "content": f"Graph Execution Error: {str(e)}"
-                })
+            # Start the graph run in the session (background)
+            await session.start_run(
+                {
+                    "messages": [HumanMessage(content=message_content)],
+                    "mode": payload_mode,
+                    "project_id": project_id
+                },
+                config=config
+            )
 
     except WebSocketDisconnect:
         print(f"Client disconnected from thread: {thread_id}")
+    finally:
+        # We don't cancel the session task here! It continues in background.
+        # But we should stop the forwarder.
+        forwarder_task.cancel()
+        # The forwarder cleanup will check if it should delete the session.
 
 
 def build_message_content(text: str, files: list):

@@ -13,7 +13,73 @@ import os
 os.environ["OPENAI_API_KEY"] = "sk-dummy-key"
 
 from mem0 import Memory
+from langchain_core.messages import SystemMessage
 from src.agent.state import AgentState
+
+# To avoid circular imports, we import get_llm inside the node
+async def analyze_memory_node(state: AgentState):
+    """
+    Analyzes the conversation history to extract important facts, user preferences,
+    or key topics that should be remembered across sessions.
+    """
+    messages = state.get("messages", [])
+    if not messages:
+        return {}
+
+    # Only run analysis on the last message if it's an assistant response 
+    # and no more tool calls are pending.
+    last_msg = messages[-1]
+    if last_msg.type != "ai" or (hasattr(last_msg, "tool_calls") and last_msg.tool_calls):
+        return {}
+
+    # Get the last couple of turns for context
+    context = ""
+    for m in messages[-4:]:
+        role = "User" if m.type == "human" else "Assistant"
+        content = m.content if isinstance(m.content, str) else "[Multimodal content]"
+        context += f"{role}: {content}\n"
+
+    # We need an LLM to extract facts. We'll import it here to avoid circular imports.
+    from src.agent.graph import get_llm
+    llm = get_llm()
+
+    prompt = f"""
+Analyze the conversation below and extract any NEW important facts about the user, their preferences, 
+projects, or specific keywords they want to track. 
+
+Rules:
+1. ONLY extract truly useful long-term facts (e.g., "User prefers Python over Java", "Project X is about AI", "User's favorite color is blue").
+2. Do NOT extract temporary information or generic conversational filler.
+3. Return the facts as a simple bulleted list.
+4. If NO new facts are found, return the word "NONE".
+
+CONVERSATION:
+{context}
+
+EXTRACTED FACTS:
+"""
+    try:
+        response = await llm.ainvoke([SystemMessage(content=prompt)])
+        content = response.content.strip()
+        
+        if content == "NONE" or not content:
+            return {}
+            
+        # Parse bullet points
+        new_facts = []
+        for line in content.split("\n"):
+            line = line.strip().lstrip("-").lstrip("•").lstrip("*").strip()
+            if line and len(line) > 5:
+                new_facts.append(line)
+        
+        if new_facts:
+            print(f"--- AUTO-EXTRACTED MEMORIES: {new_facts} ---")
+            return {"extracted_facts": new_facts}
+    except Exception as e:
+        print(f"Memory Extraction Error: {e}")
+        
+    return {}
+
 
 # Initialize Mem0 to use the local ChromaDB Podman instance we configured
 config = {
@@ -55,10 +121,12 @@ def inject_context_node(state: AgentState):
          return {}
          
     query = last_message.content
+    project_id = state.get("project_id", "default")
     
     try:
         # Search long-term memory for relevance to the user's query
-        results_dict = memory.search(query, user_id="local_user", limit=3)
+        # Use project_id for isolation
+        results_dict = memory.search(query, user_id=project_id, limit=3)
         
         context_str = ""
         results = results_dict.get("results", []) if isinstance(results_dict, dict) else results_dict
@@ -80,13 +148,14 @@ def extract_facts_node(state: AgentState):
     during its thread and permanently stores them in Mem0/ChromaDB.
     """
     facts = state.get("extracted_facts", [])
+    project_id = state.get("project_id", "default")
     
     if facts:
         try:
             # We explicitly pass infer=False because our local agent already handled the
             # intelligent extraction of facts; Mem0 just needs to store them directly.
             for fact in facts:
-                memory.add(fact, user_id="local_user", infer=False)
+                memory.add(fact, user_id=project_id, infer=False)
             
             # Optionally clear the thread facts now that they are in long-term storage
             # return {"extracted_facts": []} 

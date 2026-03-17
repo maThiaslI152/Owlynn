@@ -81,6 +81,24 @@ def search_memories(query: str, top_k: int = 8) -> list[dict]:
     return top[:top_k]
 
 
+def delete_memory(fact: str) -> bool:
+    """
+    Remove a specific fact from memories.
+    Returns True if removed, False otherwise.
+    """
+    memories = load_memories()
+    initial_count = len(memories)
+    
+    # Filter out the specific fact
+    new_memories = [m for m in memories if m["fact"] != fact]
+    
+    if len(new_memories) < initial_count:
+        with open(_MEMORIES_PATH, "w", encoding="utf-8") as f:
+            json.dump(new_memories, f, ensure_ascii=False, indent=2)
+        return True
+    return False
+
+
 def memories_to_context(query: str = "") -> str:
     """Format top memories as a system prompt context block."""
     memories = search_memories(query, top_k=8) if query else load_memories()[-8:]
