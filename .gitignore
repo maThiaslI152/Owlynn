@@ -1,0 +1,25 @@
+# Virtual Environment
+.venv/
+venv/
+ENV/
+
+# Python Caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# OS Files
+.DS_Store
+Thumbs.db
+
+# Project-specific logs and data
+graph_error.log
+data/
+workspace/
+.idea/
+.vscode/
+.antigravity/
+
+# Environment Variables
+.env
+.flaskenv
