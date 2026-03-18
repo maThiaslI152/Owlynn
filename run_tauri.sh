@@ -4,7 +4,7 @@
 echo "Starting Owlynn Desktop App Environment..."
 
 # Ensure we're in the right directory
-cd /Users/tim/Documents/Owlynn
+cd "$(dirname "$0")"
 
 # 1. Start FastAPI Backend in background
 echo "-> Starting FastAPI Backend in background..."
@@ -22,9 +22,9 @@ sleep 3 # Give it a moment to bind to port 8000
 # 2. Start Tauri Desktop App
 echo "-> Checking Tauri Icons..."
 if [ ! -f src-tauri/icons/128x128.png ]; then
-    echo "-> Generating Tauri Icons from icon.png..."
+    echo "-> Generating Tauri Icons from assets/icon.png..."
     export PATH=$PATH:$HOME/.cargo/bin
-    npx -y @tauri-apps/cli@1 icon /Users/tim/Documents/Owlynn/icon.png
+    npx -y @tauri-apps/cli@1 icon assets/icon.png
 fi
 
 echo "-> Starting Tauri Desktop App..."
