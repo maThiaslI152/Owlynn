@@ -23,3 +23,9 @@ workspace/
 # Environment Variables
 .env
 .flaskenv
+
+# Test caches
+.pytest_cache/
+
+# Rust / Tauri
+src-tauri/target/

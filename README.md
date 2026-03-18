@@ -13,7 +13,8 @@ A private, local-first autonomous agent based on Anthropic’s Cowork platform. 
 ## Prerequisites
 
 - Python 3.12+
-- Node.js (for some MCP servers if needed)
+- Node.js (for Tauri CLI and MCP servers)
+- Rust & Cargo (for Tauri Desktop App)
 - Podman and `podman compose`
 - Apple Silicon Mac (M-series) or suitable hardware for local inference
 

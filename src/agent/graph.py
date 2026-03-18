@@ -13,7 +13,7 @@ from langchain_core.messages import SystemMessage, AIMessage, ToolMessage, Remov
 from langgraph.prebuilt import ToolNode, tools_condition
 
 from .state import AgentState
-from .llm import get_mlx_openai_client
+from .llm import get_small_llm, get_large_llm
 from src.tools.core_tools import CORE_TOOLS
 from src.tools.mcp_client import mcp_manager, get_mcp_tools
 from src.memory.persona import get_persona, persona_to_system_prefix
@@ -24,67 +24,128 @@ from src.memory.long_term import inject_context_node, extract_facts_node, analyz
 from src.config.settings import MCP_CONFIG_PATH, REDIS_URL
 
 # Global instances
-_llm_instance = None
 _agent_instance = None
 _all_tools = []
-
-def get_llm():
-    """
-    Retrieves or initializes the LLM client instance.
-    
-    Returns:
-        An initialized LLM client (e.g., from get_mlx_openai_client).
-    """
-    global _llm_instance
-    if _llm_instance is None:
-        _llm_instance = get_mlx_openai_client()
-    return _llm_instance
 
 import json
 import re
 from langchain_core.utils.json import parse_json_markdown
 
 
-# Keywords that signal a task requiring tools or deep reasoning
-_AGENTIC_KEYWORDS = (
-    "search", "find", "look up", "fetch", "read", "write", "run", "execute",
-    "translate", "explain", "summarize", "analyze", "research", "news",
-    "code", "file", "script", "tool", "image", "url", "http",
-)
-
-def _is_agentic_request(messages) -> bool:
+async def small_llm_node(state: AgentState):
     """
-    Determines if the latest human message requires agentic reasoning or tools.
-
-    Checks for keywords like 'search', 'run', 'code' or if the message is
-    multimodal (e.g., image upload) or long.
-
-    Args:
-        messages: List of messages in the current state.
-
-    Returns:
-        True if the request is deemed agentic, False otherwise.
+    Orchestrator Node. Uses the Small LLM to route the logic flow.
+    Outputs a structured JSON to decide the next path.
     """
+    llm = get_small_llm()
+    messages = state.get("messages", [])
+    
+    if not messages:
+        return {"routing_decision": "SIMPLE"}
+
+    # Get the last human message for analysis
     last_human = next(
         (m.content for m in reversed(messages) if hasattr(m, "type") and m.type == "human"), ""
     )
-    if not isinstance(last_human, str):
-        return True  # multimodal → treat as agentic
-    text = last_human.lower()
-    return any(kw in text for kw in _AGENTIC_KEYWORDS) or len(text.split()) > 20
+    
+    prompt = f"""
+Analyze the user's input and determine the BEST routing action.
+You MUST output EXACTLY ONE JSON block matching this format:
+
+{{
+  "routing": "SIMPLE | CONTEXT | TOOL | COMPLEX",
+  "reason": "short explanation",
+  "search_query": " formulate look up query if routing is CONTEXT, otherwise null",
+  "tool_name": "name of tool if routing is TOOL, otherwise null",
+  "tool_args": {{ "arg_name": "val" }}
+}}
+
+Routing Criteria:
+- SIMPLE: Greetings, casual chat, simple direct answers, thanking you.
+- CONTEXT: Questions about the user's past, generic facts likely stored in documents/notes, or anything requiring memory lookup.
+- TOOL: Read/write workspace files, execute shell command, sandboxed python.
+- COMPLEX: Calculations, coding help, technical teaching, structured analysis, long research with synthesis.
+
+USER INPUT: "{last_human}"
+
+JSON RESPONSE:"""
+
+    try:
+        response = await llm.ainvoke([HumanMessage(content=prompt)])
+        content = response.content.strip()
+        
+        # Robust JSON parsing
+        match = re.search(r'\{.*\}', content, re.DOTALL)
+        if match:
+             parsed = json.loads(match.group(0))
+             decision = parsed.get("routing", "COMPLEX").upper()
+        else:
+             parsed = {}
+             decision = "COMPLEX"
+             
+        # Fallback/Sanitization
+        if decision not in ["SIMPLE", "CONTEXT", "TOOL", "COMPLEX"]:
+             decision = "COMPLEX"
+             
+        # If TOOL, we MUST append an AIMessage with tool_calls for ToolNode to pick up
+        messages_to_append = []
+        if decision == "TOOL" and parsed.get("tool_name"):
+             tool_call = {
+                 "name": parsed["tool_name"],
+                 "args": parsed.get("tool_args", {}),
+                 "id": f"call_small_{len(messages)}"
+             }
+             # Create AIMessage with tool call
+             ai_msg = AIMessage(content="", tool_calls=[tool_call])
+             messages_to_append.append(ai_msg)
+
+        # If CONTEXT, we can inject search query into state or let inject_context handle it
+        # Wait, inject_context already reads messages[-1], so we don't strictly need to modify messages,
+        # but we can pass search_query in state for debugging or if we want to override the query.
+
+        return_state = {
+            "routing_decision": decision,
+            "current_task": parsed.get("reason", "Routing decision made")
+        }
+        if messages_to_append:
+             return_state["messages"] = messages_to_append
+             
+        return return_state
+        
+    except Exception as e:
+        print(f"Small LLM Routing Error: {e}")
+        return {"routing_decision": "COMPLEX"}
+
+async def simple_response_node(state: AgentState):
+    """
+    Generates a lightweight response using the Small LLM for simple queries.
+    """
+    llm = get_small_llm()
+    messages = state.get("messages", [])
+    
+    system_prompt = "You are Owlynn, a friendly AI assistant. Answer the user response directly and concisely."
+    
+    # Simple prompt assembling
+    structured_messages = [SystemMessage(content=system_prompt)] + messages
+    
+    response = await llm.ainvoke(structured_messages)
+    return {"messages": [response]}
 
 
-async def reason_node(state: AgentState):
+
+async def large_llm_node(state: AgentState):
     """
-    The core reasoning engine of the agent. Given the current state and messages,
-    it decides what action to execute next.
+    The core reasoning engine of the agent. Uses the Large LLM to solve 
+    complex tasks, synthesize information, and execute actions.
     """
-    llm = get_llm()
+    llm = get_large_llm()
     messages = state.get("messages", [])
 
     mode = state.get("mode", "tools_on")
+    routing = state.get("routing_decision", "COMPLEX")
 
-    agentic = _is_agentic_request(messages) and mode != "tools_off"
+    # Treat as agentic if routed to TOOL or COMPLEX and tools are enabled
+    agentic = routing in ["TOOL", "COMPLEX"] and mode != "tools_off"
 
     # --- 1. Static Rules (Persona, Guidelines, Project Instructions) ---
     try:
@@ -522,8 +583,8 @@ def validate_or_tools(state: AgentState):
         if messages: f.write(f"Last msg type: {type(messages[-1]).__name__}\n")
 
     if messages and isinstance(messages[-1], ToolMessage):
-        with open("/tmp/prompt_debug.txt", "a") as f: f.write(">>> validate_or_tools RETURNING: reasoning (Has ToolMessage)\n")
-        return "reasoning"
+        with open("/tmp/prompt_debug.txt", "a") as f: f.write(">>> validate_or_tools RETURNING: large_llm (Has ToolMessage)\n")
+        return "large_llm"
     
     # Use tools_condition to check for tool calls
     res = tools_condition(state)
@@ -533,8 +594,9 @@ def validate_or_tools(state: AgentState):
     if res == END:
         with open("/tmp/prompt_debug.txt", "a") as f: f.write(">>> validate_or_tools RETURNING: analyze_memory\n")
         return "analyze_memory"
-        
-    with open("/tmp/prompt_debug.txt", "a") as f: f.write(f">>> validate_or_tools RETURNING: {res}\n")
+    
+    # Map 'tools' from tools_condition to 'tools' (same)
+    # If tools_condition returns something else, verify.
     return res
 
 async def summarize_history_node(state: AgentState):
@@ -551,7 +613,7 @@ async def summarize_history_node(state: AgentState):
     if not older_messages:
         return {}
 
-    llm = get_llm()
+    llm = get_small_llm()
     summary_prompt = (
         f"Summarize the following conversation history concisely. "
         f"Retain all factual data, file paths, and established constraints:\n\n"
@@ -566,6 +628,10 @@ async def summarize_history_node(state: AgentState):
     
     return {"messages": delete_messages + [summary_message]}
 
+def small_llm_routes(state: AgentState):
+    """Routes from small_llm based on routing_decision."""
+    return state.get("routing_decision", "COMPLEX")
+
 def build_graph(tools):
     """
     Constructs the primary LangGraph execution structure.
@@ -574,8 +640,10 @@ def build_graph(tools):
     
     # Add nodes
     workflow.add_node("summarize", summarize_history_node)
-    workflow.add_node("inject_context", inject_context_node)
-    workflow.add_node("reasoning", reason_node)
+    workflow.add_node("small_llm", small_llm_node)
+    workflow.add_node("simple_response", simple_response_node)
+    workflow.add_node("ltm_search", inject_context_node)
+    workflow.add_node("large_llm", large_llm_node)
     workflow.add_node("validate", validate_node)
     workflow.add_node("tools", ToolNode(tools))
     workflow.add_node("analyze_memory", analyze_memory_node)
@@ -583,21 +651,40 @@ def build_graph(tools):
     
     # Define edges
     workflow.add_edge(START, "summarize")
-    workflow.add_edge("summarize", "inject_context")
-    workflow.add_edge("inject_context", "reasoning")
-    workflow.add_edge("reasoning", "validate")
+    workflow.add_edge("summarize", "small_llm")
     
+    # Route from Small LLM
+    workflow.add_conditional_edges(
+        "small_llm",
+        small_llm_routes,
+        {
+            "SIMPLE": "simple_response",
+            "CONTEXT": "ltm_search",
+            "TOOL": "tools",
+            "COMPLEX": "large_llm"
+        }
+    )
+    
+    # Connections after branching
+    workflow.add_edge("simple_response", "analyze_memory")
+    workflow.add_edge("ltm_search", "large_llm")
+    workflow.add_edge("tools", "large_llm")
+    
+    # From Large LLM to validation
+    workflow.add_edge("large_llm", "validate")
+    
+    # Validation loop (supports tools or ending)
     workflow.add_conditional_edges(
         "validate",
         validate_or_tools,
         {
             "tools": "tools", 
             "analyze_memory": "analyze_memory",
-            "reasoning": "reasoning"
+            "large_llm": "large_llm"
         }
     )
     
-    workflow.add_edge("tools", "reasoning")
+    # Connections after branching and validation loops are set
     workflow.add_edge("analyze_memory", "extract_facts")
     workflow.add_edge("extract_facts", END)
 

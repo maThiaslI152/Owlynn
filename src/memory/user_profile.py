@@ -15,8 +15,12 @@ _DEFAULTS = {
     "education_level": "university",
     "domains_of_interest": [],
     "response_style": "detailed",
-    "llm_base_url": "http://127.0.0.1:8080/v1",
-    "llm_model_name": "qwen/qwen3.5-9b"
+    "llm_base_url": "http://127.0.0.1:1234/v1",
+    "llm_model_name": "qwen/qwen3.5-9b",
+    "small_llm_base_url": "http://127.0.0.1:1234/v1",
+    "small_llm_model_name": "nvidia/nemotron-3-nano-4b",
+    "large_llm_base_url": "http://127.0.0.1:1234/v1",
+    "large_llm_model_name": "qwen/qwen3.5-9b"
 }
 
 VALID_FIELDS = {
@@ -26,7 +30,11 @@ VALID_FIELDS = {
     "domains_of_interest": list,
     "response_style": str,       # "concise", "detailed", "step_by_step"
     "llm_base_url": str,
-    "llm_model_name": str
+    "llm_model_name": str,
+    "small_llm_base_url": str,
+    "small_llm_model_name": str,
+    "large_llm_base_url": str,
+    "large_llm_model_name": str
 }
 
 

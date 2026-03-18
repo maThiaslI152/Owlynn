@@ -39,4 +39,7 @@ class AgentState(TypedDict):
     # Track if any tool execution was vetted/approved by security node
     execution_approved: bool | None
 
+    # Routing decision from small model: 'SIMPLE', 'CONTEXT', 'TOOL', 'COMPLEX'
+    routing_decision: str | None
+
 

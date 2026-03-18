@@ -566,13 +566,13 @@ async def websocket_endpoint(websocket: WebSocket, thread_id: str):
                     if kind in ["on_chain_start", "on_chain_end"]:
                         print(f"[WS Debug] Event={kind} | Node={node}")
 
-                    if kind == "on_chat_model_stream" and node == "reasoning":
+                    if kind == "on_chat_model_stream" and node in ["large_llm", "simple_response"]:
                         chunk = event["data"]["chunk"]
                         if chunk.content:
                             await websocket.send_json({"type": "chunk", "content": chunk.content})
                         
                     elif kind == "on_chain_end":
-                        if node == "reasoning":
+                        if node in ["large_llm", "simple_response"]:
                             output = event["data"]["output"]
                             if isinstance(output, dict) and "messages" in output:
                                 msg = output["messages"][0]

@@ -45,9 +45,9 @@ async def analyze_memory_node(state: AgentState):
         content = m.content if isinstance(m.content, str) else "[Multimodal content]"
         context += f"{role}: {content}\n"
 
-    # We need an LLM to extract facts. We'll import it here to avoid circular imports.
-    from src.agent.graph import get_llm
-    llm = get_llm()
+    # We need an LLM to extract facts.
+    from src.agent.llm import get_small_llm
+    llm = get_small_llm()
 
     prompt = f"""
 Analyze the conversation below and extract any NEW important facts about the user, their preferences, 
@@ -108,7 +108,11 @@ config = {
     }
 }
 
-memory = Memory.from_config(config)
+try:
+    memory = Memory.from_config(config)
+except Exception as e:
+    print(f"Warning: Failed to initialize Mem0/ChromaDB connection: {e}")
+    memory = None
 
 def inject_context_node(state: AgentState):
     """
@@ -116,6 +120,10 @@ def inject_context_node(state: AgentState):
     Takes the latest user message and searches Mem0/ChromaDB for relevant memories.
     Injects these memories into the `long_term_context` state variable before reasoning.
     """
+    if memory is None:
+        # Gracefully skip if ChromaDB is unavailable
+        return {"long_term_context": ""}
+
     messages = state.get("messages", [])
     if not messages:
         return {}
@@ -153,6 +161,9 @@ async def extract_facts_node(state: AgentState):
     After a task finishes, this node looks at any facts the agent explicitly extracted 
     during its thread and permanently stores them in Mem0/ChromaDB.
     """
+    if memory is None:
+        return {}
+
     facts = state.get("extracted_facts", [])
     project_id = state.get("project_id", "default")
     
