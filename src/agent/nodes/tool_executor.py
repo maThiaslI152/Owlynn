@@ -1,7 +1,12 @@
-from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_core.messages import SystemMessage, AIMessage
 from src.agent.state import AgentState
-from src.agent.llm import large_llm
-from src.tools import tool_registry
+from src.agent.llm import large_llm_with_tools
+from langgraph.prebuilt import ToolNode
+from src.tools import web_search, execute_python_code, read_workspace_file, recall_memories
+
+# Define tools for ToolNode (must match to bound tools)
+TOOLS = [web_search, execute_python_code, read_workspace_file, recall_memories]
+tool_node = ToolNode(TOOLS)
 
 EXECUTOR_PROMPT = """You are a reasoning agent. The tool to use has already been selected: {tool_name}.
 Your job:
@@ -13,8 +18,6 @@ Memory context:
 
 async def tool_executor_node(state: AgentState) -> AgentState:
     tool_name = state.get("selected_tool", "web_search")
-    tool_fn = tool_registry.get(tool_name)
-    
     memory_context = state.get("memory_context", "None")
     
     prompt = EXECUTOR_PROMPT.format(
@@ -23,24 +26,33 @@ async def tool_executor_node(state: AgentState) -> AgentState:
     )
     
     messages = state.get("messages", [])
-    user_message = messages[-1].content if messages else ""
 
-    # Large model generates tool args (or processes the prompt)
-    arg_response = await large_llm.ainvoke([
+    # Large model generates tool args or responds
+    response = await large_llm_with_tools.ainvoke([
         SystemMessage(content=prompt),
-        HumanMessage(content=str(user_message))
+        *messages
     ])
     
-    if tool_fn:
-        try:
-             tool_result = await tool_fn(arg_response.content)
-             result_val = tool_result
-        except Exception as e:
-             result_val = f"Error executing tool '{tool_name}': {str(e)}"
-    else:
-        result_val = f"Tool '{tool_name}' not found in registry."
+    updated_messages = list(messages) + [response]
+    result_val = None
+
+    if response.tool_calls:
+        # Execute tool via ToolNode
+        tool_output = await tool_node.ainvoke({"messages": updated_messages})
+        updated_messages = tool_output["messages"]
         
+        # Capture raw result content for backward compatibility
+        if updated_messages:
+            result_val = updated_messages[-1].content
+            
+        # Call LLM again to interpret result and produce final response
+        final_response = await large_llm_with_tools.ainvoke(updated_messages)
+        updated_messages.append(final_response)
+    else:
+        result_val = "Model did not issue a tool call. Response: " + str(response.content)
+
     return {
-        "tool_result": result_val,
+        "messages": updated_messages,
+        "tool_result": str(result_val) if result_val else None,
         "model_used": "large"
     }

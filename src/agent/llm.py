@@ -53,3 +53,9 @@ def get_llm():
 small_llm = get_small_llm()
 large_llm = get_large_llm()
 
+# --- TOOL BINDING FOR LARGE LLM ---
+from src.tools import web_search, execute_python_code, read_workspace_file, recall_memories
+
+TOOLS = [web_search, execute_python_code, read_workspace_file, recall_memories]
+large_llm_with_tools = large_llm.bind_tools(TOOLS)
+
