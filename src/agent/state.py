@@ -42,4 +42,13 @@ class AgentState(TypedDict):
     # Routing decision from small model: 'SIMPLE', 'CONTEXT', 'TOOL', 'COMPLEX'
     routing_decision: str | None
 
+    # Pre-formulated search query for CONTEXT routing
+    search_query: str | None
+
+    # Confidence score from small model routing
+    routing_confidence: float | None
+
+    # Counter for validation retry loops
+    retry_count: int | None
+
 

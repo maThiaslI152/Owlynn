@@ -7,6 +7,9 @@ and defines graph nodes for injecting context and extracting facts.
 
 import os
 import asyncio
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Mem0 implicitly initializes its internal default OpenAI client during setup,
 # so we provide a dummy key to prevent `api_key` initialization errors,
@@ -28,14 +31,13 @@ async def analyze_memory_node(state: AgentState):
         return {}
 
     # DEBUG LOG Start
-    with open("/tmp/prompt_debug.txt", "a") as f:
-        f.write("\n>>> [Node] analyze_memory_node ENTERING\n")
-        f.write(f"Messages count: {len(messages)}\n")
-        if messages: f.write(f"Last msg type: {messages[-1].type}\n")
+    logger.debug(f"\n>>> [Node] analyze_memory_node ENTERING\nMessages count: {len(messages)}")
+    if messages:
+        logger.debug(f"Last msg type: {messages[-1].type}")
 
     last_msg = messages[-1]
     if last_msg.type != "ai" or (hasattr(last_msg, "tool_calls") and last_msg.tool_calls):
-        with open("/tmp/prompt_debug.txt", "a") as f: f.write(">>> [Node] analyze_memory_node SKIPPING: Not AI or has tool calls\n")
+        logger.debug(">>> [Node] analyze_memory_node SKIPPING: Not AI or has tool calls")
         return {}
 
     # Get the last couple of turns for context
@@ -114,10 +116,10 @@ except Exception as e:
     print(f"Warning: Failed to initialize Mem0/ChromaDB connection: {e}")
     memory = None
 
-def inject_context_node(state: AgentState):
+async def inject_context_node(state: AgentState):
     """
     RAG Pre-Execution Node.
-    Takes the latest user message and searches Mem0/ChromaDB for relevant memories.
+    Takes the latest user message (or pre-formulated search_query) and searches Mem0/ChromaDB for relevant memories.
     Injects these memories into the `long_term_context` state variable before reasoning.
     """
     if memory is None:
@@ -134,13 +136,15 @@ def inject_context_node(state: AgentState):
     if last_message.type != "human":
          return {}
          
-    query = last_message.content
+    # Use pre-formulated search query if available, otherwise fallback to raw message
+    query = state.get("search_query") or last_message.content
     project_id = state.get("project_id", "default")
     
     try:
         # Search long-term memory for relevance to the user's query
         # Use project_id for isolation
-        results_dict = memory.search(query, user_id=project_id, limit=3)
+        # Wrap in asyncio.to_thread to prevent blocking the event loop
+        results_dict = await asyncio.to_thread(memory.search, query, user_id=project_id, limit=3)
         
         context_str = ""
         results = results_dict.get("results", []) if isinstance(results_dict, dict) else results_dict

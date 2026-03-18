@@ -31,7 +31,8 @@ async def test_small_llm_node_simple():
 async def test_small_llm_node_tool():
     # Mock Small LLM to return TOOL
     mock_llm = AsyncMock()
-    mock_llm.ainvoke.return_value = AIMessage(content='{"routing": "TOOL", "reason": "Need list", "tool_name": "list_files", "tool_args": {"dir": "."}}')
+    # Simplified JSON response format without tool_args
+    mock_llm.ainvoke.return_value = AIMessage(content='{"routing": "TOOL", "reason": "Need list", "confidence": 0.9}')
     
     state: AgentState = {
         "messages": [HumanMessage(content="list files")],
@@ -43,9 +44,8 @@ async def test_small_llm_node_tool():
         result = await small_llm_node(state)
         
     assert result["routing_decision"] == "TOOL"
-    assert "messages" in result
-    assert hasattr(result["messages"][0], "tool_calls")
-    assert result["messages"][0].tool_calls[0]["name"] == "list_files"
+    # Suggestion #1 & #2: Messages are no longer appended here for tool calls
+    assert "messages" not in result
 
 def test_graph_compilation():
     # Verify the graph compiles without errors

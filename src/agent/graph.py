@@ -22,6 +22,9 @@ from src.memory.memory_manager import memories_to_context
 from src.memory.project import project_manager
 from src.memory.long_term import inject_context_node, extract_facts_node, analyze_memory_node
 from src.config.settings import MCP_CONFIG_PATH, REDIS_URL
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Global instances
 _agent_instance = None
@@ -29,7 +32,6 @@ _all_tools = []
 
 import json
 import re
-from langchain_core.utils.json import parse_json_markdown
 
 
 async def small_llm_node(state: AgentState):
@@ -48,6 +50,10 @@ async def small_llm_node(state: AgentState):
         (m.content for m in reversed(messages) if hasattr(m, "type") and m.type == "human"), ""
     )
     
+    # Suggestion #9: Keyword check to force CONTEXT for memory references
+    memory_keywords = ["last time", "as before", "remember when", "we talked about", "you said"]
+    force_context = any(kw in last_human.lower() for kw in memory_keywords) if isinstance(last_human, str) else False
+
     prompt = f"""
 Analyze the user's input and determine the BEST routing action.
 You MUST output EXACTLY ONE JSON block matching this format:
@@ -55,9 +61,8 @@ You MUST output EXACTLY ONE JSON block matching this format:
 {{
   "routing": "SIMPLE | CONTEXT | TOOL | COMPLEX",
   "reason": "short explanation",
-  "search_query": " formulate look up query if routing is CONTEXT, otherwise null",
-  "tool_name": "name of tool if routing is TOOL, otherwise null",
-  "tool_args": {{ "arg_name": "val" }}
+  "search_query": "formulate look up query if routing is CONTEXT, otherwise null",
+  "confidence": 0.9
 }}
 
 Routing Criteria:
@@ -79,36 +84,29 @@ JSON RESPONSE:"""
         if match:
              parsed = json.loads(match.group(0))
              decision = parsed.get("routing", "COMPLEX").upper()
+             confidence = parsed.get("confidence")
+             search_query = parsed.get("search_query")
         else:
              parsed = {}
              decision = "COMPLEX"
+             confidence = None
+             search_query = None
              
         # Fallback/Sanitization
-        if decision not in ["SIMPLE", "CONTEXT", "TOOL", "COMPLEX"]:
+        if force_context:
+             decision = "CONTEXT"
+             logger.info("Forcing CONTEXT route due to memory keywords")
+        elif decision not in ["SIMPLE", "CONTEXT", "TOOL", "COMPLEX"]:
              decision = "COMPLEX"
              
-        # If TOOL, we MUST append an AIMessage with tool_calls for ToolNode to pick up
-        messages_to_append = []
-        if decision == "TOOL" and parsed.get("tool_name"):
-             tool_call = {
-                 "name": parsed["tool_name"],
-                 "args": parsed.get("tool_args", {}),
-                 "id": f"call_small_{len(messages)}"
-             }
-             # Create AIMessage with tool call
-             ai_msg = AIMessage(content="", tool_calls=[tool_call])
-             messages_to_append.append(ai_msg)
-
-        # If CONTEXT, we can inject search query into state or let inject_context handle it
-        # Wait, inject_context already reads messages[-1], so we don't strictly need to modify messages,
-        # but we can pass search_query in state for debugging or if we want to override the query.
+        # Suggestion #1 & #2: TOOL route goes to large_llm, skip manual tool_call creation
 
         return_state = {
             "routing_decision": decision,
-            "current_task": parsed.get("reason", "Routing decision made")
+            "current_task": parsed.get("reason", "Routing decision made"),
+            "search_query": search_query if decision == "CONTEXT" else None,
+            "routing_confidence": confidence
         }
-        if messages_to_append:
-             return_state["messages"] = messages_to_append
              
         return return_state
         
@@ -176,14 +174,8 @@ CORE RULES:
 3. FILES: Access files using `list_workspace_files` and `read_workspace_file`.
 4. REASONING: Wrap ALL thinking in ONE `<thought>` block. Keep it brief.
 5. NO HALLUCINATION: If calling a tool, do NOT predict its output in the same message.
-6. FORMATTING: If calling a tool, you MUST use ONLY the following JSON block format:
-```json
-{ "name": "tool_name", "arguments": { "arg": "val" } }
-```
-Do NOT output multiple tool calls in a row and finish immediate after the block.
-7. PRESENTATION: Avoid complex ASCII art with frame/box drawing characters. For grids, matrixes, or tables, strictly use Standard Markdown Tables or simple lists to stay fast.
-8. PYTHON TIP: Inside f-string expressions (e.g. f"{var}"), do NOT use backslashes (`\`). Define the escaped string variable outside the f-string first.
-9. WEB FALLBACK: If you have already read a file (or listed files) and the information is NOT in the local files, STOP reading more files. Instead, immediately call `web_search` with a clear, specific query. Do NOT re-read the same file or list files again. Local files → web search, not local files → more local files.
+6. PRESENTATION: Avoid complex ASCII art with frame/box drawing characters. For grids, matrixes, or tables, strictly use Standard Markdown Tables or simple lists to stay fast.
+7. WEB FALLBACK: If you have already read a file (or listed files) and the information is NOT in the local files, STOP reading more files. Instead, immediately call `web_search` with a clear, specific query. Do NOT re-read the same file or list files again. Local files → web search, not local files → more local files.
 """
 
     else:
@@ -265,12 +257,10 @@ Do NOT output multiple tool calls in a row and finish immediate after the block.
     # Async execution with stop sequences for fast mode
     
     # DEBUG: Log prompt structure to diagnose LM Studio Jinja template error
-    with open("/tmp/prompt_debug.txt", "a") as f:
-        f.write(f"\n--- Turn Context ---\n")
-        f.write(f"Messages Count: {len(structured_messages)}\n")
-        for i, m in enumerate(structured_messages):
-            f.write(f"[{i}] Type: {type(m).__name__}, ID: {getattr(m, 'id', 'N/A')}\n")
-            # f.write(f"Content: {m.content[:100]}...\n") 
+    # DEBUG: Log prompt structure
+    logger.debug(f"\n--- Turn Context ---\nMessages Count: {len(structured_messages)}")
+    for i, m in enumerate(structured_messages):
+        logger.debug(f"[{i}] Type: {type(m).__name__}, ID: {getattr(m, 'id', 'N/A')}")
             
     if mode == "tools_off":
         response = await llm_with_tools.ainvoke(
@@ -309,117 +299,12 @@ Do NOT output multiple tool calls in a row and finish immediate after the block.
 
         new_content = re.sub(r'<(thought|think)>.*?</(thought|think)>', '', new_content, flags=re.DOTALL)
 
-        # 2. Handle cases where the model rambles WITHOUT tags (common in GLM-4)
-        monologue_patterns = [
-            r"(?i)^got it,?\s",
-            r"(?i)^(okay|ok|alright|certainly),?\s(so|let's|i)\s",
-            r"(?i)^let's\s(answer|tackle|start|begin|greet|address|mention|structure|draft|break|examine|look|find|search|fetch|read)",
-            r"(?i)^i\s(will|would|should|need to|can|must|am going to)\s",
-            r"(?i)^first,?\s(i|let|we)\s",
-            r"(?i)^the\suser\s(is|wants|asks|has)",
-            r"(?i)^(so|now|then|after that|next),?\si\s",
-            r"(?i)^to\s(answer|address|solve|help|assist)",
-            r"(?i)^here('s|\sis)\s(the|my|your|a)\s(answer|response|solution|summary|brief)",
-            r"(?i)^(thinking|reasoning|analyzing|considering|evaluating|searching|fetching|reading)\s",
-            r"(?i)^in\sorder\sto\s",
-            r"(?i)^sure,?\s",
-            r"(?i)^i\scan\shelp\swith\s",
-            r"(?i)^(hello|hi|greetings|good morning|good afternoon|good evening),?\s",
-            r"(?i)^i('ve| have)\s(already\s)?(found|searched|conducted|looked|received|called)",
-            r"(?i)^based\son\s(the|my|your|this|information)",
-            r"(?i)^this\sis\s(a|an|the)\s",
-            r"(?i)^i\sdon't\sneed\s",
-            r"(?i)^it's\sa\s",
-        ]
-        
-        sentences = re.split(r'(?<=[.!?])\s+', new_content)
-        cleaned_sentences = []
-        found_start_of_response = False
-
-        for sentence in sentences:
-            if not found_start_of_response:
-                if any(re.match(pattern, sentence.strip()) for pattern in monologue_patterns):
-                    modified = True
-                    continue # Skip this sentence
-                else:
-                    found_start_of_response = True
-            cleaned_sentences.append(sentence)
-
-        if modified or len(cleaned_sentences) != len(sentences):
-            new_content = ' '.join(cleaned_sentences).strip()
-            modified = True
+        # Removed monologue_patterns heuristic scraping (Static rule for old GLM-4 model)
 
         # Hard length limit for fast mode
         # Removed fast mode length restriction to allow detailed natural answers.
 
-    if mode != "tools_off" and not new_tool_calls and "{" in new_content:
-        try:
-             # Incremental parser for finding valid JSON object from the front
-             # Breaks repeating GLM-4 lists of dicts
-             start_idx = new_content.find("{")
-             found_data = None
-             for end_idx in range(start_idx + 10, len(new_content) + 1):
-                 try:
-                     sub_str = new_content[start_idx:end_idx]
-                     parsed = json.loads(sub_str)
-                     if isinstance(parsed, dict) and ("name" in parsed or "tool_calls" in parsed):
-                         found_data = parsed
-                         break
-                 except json.JSONDecodeError:
-                     continue
-             
-             # Fallback to standard parser if incremental failed or found nothing
-             if not found_data:
-                 try:
-                     found_data = parse_json_markdown(new_content)
-                 except Exception:
-                     pass
-
-             if isinstance(found_data, dict):
-                 # Case 1: Standard top-level Name/Arguments
-                 if "name" in found_data:
-                      args = found_data.get("arguments") or found_data.get("parameters") or found_data.get("args") or {}
-                      new_tool_calls = [{
-                          "name": found_data["name"],
-                          "args": args,
-                          "id": f"call_inc_{len(messages)}"
-                      }]
-                 # Case 2: Native Wrapped {"tool_calls": [...]}
-                 elif "tool_calls" in found_data:
-                      for tc in found_data["tool_calls"]:
-                          if isinstance(tc, dict) and "name" in tc:
-                              args = tc.get("arguments") or tc.get("parameters") or tc.get("args") or {}
-                              new_tool_calls.append({
-                                  "name": tc["name"],
-                                  "args": args,
-                                  "id": f"call_inc_{len(new_tool_calls)}_{len(messages)}"
-                              })
-                 
-                 if new_tool_calls:
-                      new_content = ""
-                      modified = True
-        except Exception:
-             pass 
-
-            
-        # Also check for Qwen's native <tool_call> tags if parse_json_markdown failed
-        if not new_tool_calls and "<tool_call>" in new_content:
-            tool_match = re.search(r'<tool_call>(.*?)</tool_call>', new_content, re.DOTALL)
-            if tool_match:
-                try:
-                    tool_data = json.loads(tool_match.group(1))
-                    if "name" in tool_data and "arguments" in tool_data:
-                        new_tool_calls = [{
-                            "name": tool_data["name"],
-                            "args": tool_data["arguments"],
-                            "id": f"call_{len(messages)}"
-                        }]
-                        new_content = new_content.replace(tool_match.group(0), "").strip()
-                        if not new_content:
-                            new_content = "" # Silence "Executing tool..." filler
-                        modified = True
-                except json.JSONDecodeError:
-                    pass
+        # Removed manual JSON & XML parser fallbacks for old LLMs (legacy support)
 
     # Failsafe: Programmatic Refusal Override
     refusal_keywords = [
@@ -496,13 +381,7 @@ Do NOT output multiple tool calls in a row and finish immediate after the block.
 
 
     if new_content and new_tool_calls:
-        # If we have tool calls, we are VERY aggressive about stripping pre-tool monologue
-        lines = new_content.split('\n')
-        remaining_lines = []
-        for line in lines:
-            if not any(re.match(p, line.strip()) for p in monologue_patterns):
-                remaining_lines.append(line)
-        new_content = '\n'.join(remaining_lines).strip()
+        # Removed aggressive pre-tool monologue stripping
         
         # If it still contains "Hello" or final-sounding answers while calling a tool, it's likely a hallucination/leak
         if len(new_content) < 150 and any(kw in new_content.lower() for kw in ["hello", "hi ", "based on", "here are", "i found"]):
@@ -569,7 +448,8 @@ def validate_node(state: AgentState):
                 )
                  
         if danger_detected:
-            return {"messages": tool_messages}
+            retry_count = state.get("retry_count", 0) or 0
+            return {"messages": tool_messages, "retry_count": retry_count + 1}
                         
     return {}
 
@@ -577,22 +457,19 @@ def validate_or_tools(state: AgentState):
     """Routes to tools if safe, or back to reasoning if blocked."""
     messages = state.get("messages", [])
     
-    with open("/tmp/prompt_debug.txt", "a") as f:
-        f.write("\n>>> [Condition] validate_or_tools ENTERING\n")
-        f.write(f"Messages count: {len(messages)}\n")
-        if messages: f.write(f"Last msg type: {type(messages[-1]).__name__}\n")
+    # Check retry budget for looped/blocked calls
+    retry_count = state.get("retry_count", 0) or 0
+    if retry_count >= 3:
+        logger.warning("Validation retry limit reached. Breaking loop to analyze_memory.")
+        return "analyze_memory"
 
     if messages and isinstance(messages[-1], ToolMessage):
-        with open("/tmp/prompt_debug.txt", "a") as f: f.write(">>> validate_or_tools RETURNING: large_llm (Has ToolMessage)\n")
         return "large_llm"
     
     # Use tools_condition to check for tool calls
     res = tools_condition(state)
     
-    with open("/tmp/prompt_debug.txt", "a") as f: f.write(f">>> tools_condition returned: {res}\n")
-
     if res == END:
-        with open("/tmp/prompt_debug.txt", "a") as f: f.write(">>> validate_or_tools RETURNING: analyze_memory\n")
         return "analyze_memory"
     
     # Map 'tools' from tools_condition to 'tools' (same)
@@ -620,8 +497,17 @@ async def summarize_history_node(state: AgentState):
         f"{older_messages}"
     )
     
-    summary_response = await llm.ainvoke([HumanMessage(content=summary_prompt)])
-    summary_message = SystemMessage(content=f"Previous Conversation Summary: {summary_response.content}")
+    try:
+        summary_response = await asyncio.wait_for(
+            llm.ainvoke([HumanMessage(content=summary_prompt)]),
+            timeout=20.0
+        )
+        summary_content = summary_response.content
+    except asyncio.TimeoutError:
+        logger.warning("summarize_history_node timed out. Proceeding without summary.")
+        summary_content = "Previous conversation history collapsed due to processing timeout."
+        
+    summary_message = SystemMessage(content=f"Previous Conversation Summary: {summary_content}")
     
     # Instruct LangGraph to remove the older messages from the state
     delete_messages = [RemoveMessage(id=m.id) for m in older_messages if hasattr(m, "id") and m.id]
@@ -660,7 +546,7 @@ def build_graph(tools):
         {
             "SIMPLE": "simple_response",
             "CONTEXT": "ltm_search",
-            "TOOL": "tools",
+            "TOOL": "large_llm",  # Suggestion #1: TOOL route goes to large_llm
             "COMPLEX": "large_llm"
         }
     )
