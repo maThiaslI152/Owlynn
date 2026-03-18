@@ -49,3 +49,7 @@ def get_llm():
     """
     return get_large_llm()
 
+# --- TOP-LEVEL VARIABLES FOR SUGGESTION STRUCTURE ---
+small_llm = get_small_llm()
+large_llm = get_large_llm()
+

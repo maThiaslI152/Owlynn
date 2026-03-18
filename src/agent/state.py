@@ -51,4 +51,12 @@ class AgentState(TypedDict):
     # Counter for validation retry loops
     retry_count: int | None
 
+    # --- NEW FIELDS FOR TOOL SELECTION FLOW ---
+    route: str | None              # 'simple', 'complex', 'tool', 'memory'
+    selected_tool: str | None      # Set by tool_selector_node
+    tool_result: str | None        # Set after tool execution
+    model_used: str | None         # 'small' or 'large'
+    memory_context: str | None     # Formatted context string
+    persona: str | None            # Persona summary string
+
 
