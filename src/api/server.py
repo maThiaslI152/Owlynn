@@ -21,6 +21,13 @@ from src.memory.persona import get_persona, update_persona_field
 from src.memory.memory_manager import load_memories, save_memory, delete_memory
 from src.memory.project import project_manager
 from src.config.settings import WORKSPACE_DIR
+
+def get_project_workspace(project_id: str = "default") -> str:
+    if not project_id or project_id == "null" or project_id == "undefined":
+         project_id = "default"
+    path = os.path.abspath(os.path.join(WORKSPACE_DIR, "projects", project_id))
+    os.makedirs(path, exist_ok=True)
+    return path
 from src.api.file_processor import start_watcher
 
 from contextlib import asynccontextmanager
@@ -180,21 +187,23 @@ async def api_update_project_chat(project_id: str, chat_id: str, body: dict):
     return {"status": "ok"}
 
 @app.get("/api/files")
-async def api_list_files(sub_path: str = ""):
+async def api_list_files(sub_path: str = "", project_id: str = "default"):
     """Returns a list of files in the workspace with processing status and folder support."""
     try:
         import urllib.parse
         sub_path = urllib.parse.unquote(sub_path)
         
-        target_dir = os.path.abspath(os.path.join(WORKSPACE_DIR, sub_path))
-        if not target_dir.startswith(os.path.abspath(WORKSPACE_DIR)):
+        base_dir = get_project_workspace(project_id)
+        target_dir = os.path.abspath(os.path.join(base_dir, sub_path))
+        if not target_dir.startswith(os.path.abspath(base_dir)):
              return {"status": "error", "message": "Access denied"}
              
         files = []
         if not os.path.exists(target_dir):
             return []
             
-        processed_dir = os.path.join(WORKSPACE_DIR, ".processed")
+        processed_dir = os.path.join(base_dir, ".processed")
+        root_processed_dir = os.path.join(str(WORKSPACE_DIR), ".processed")  # Legacy watcher cache location
         
         for f in os.listdir(target_dir):
             if f.startswith(".") or f == "__pycache__":
@@ -205,35 +214,37 @@ async def api_list_files(sub_path: str = ""):
             # Identify if item is Folder or File
             is_dir = os.path.isdir(filepath)
             
-            # File extraction status cache check
+            # File extraction status cache check (project-local or root watcher cache)
             has_cache = False
-            filename_only = f
             if not is_dir:
-                 has_cache = os.path.exists(os.path.join(processed_dir, filename_only + ".txt")) or \
-                           os.path.exists(os.path.join(processed_dir, filename_only + ".md"))
+                 has_cache = (
+                     os.path.exists(os.path.join(processed_dir, f + ".txt")) or
+                     os.path.exists(os.path.join(processed_dir, f + ".md")) or
+                     os.path.exists(os.path.join(root_processed_dir, f + ".txt")) or
+                     os.path.exists(os.path.join(root_processed_dir, f + ".md"))
+                 )
                            
             files.append({
                 "name": f,
                 "size": stats.st_size if not is_dir else 0,
                 "modified": stats.st_mtime,
                 "type": "folder" if is_dir else "file",
-                "status": "processed" if has_cache else "idle" # "idle", "processing", "processed"
+                "status": "processed" if has_cache else "idle"
             })
-        return sorted(files, key=lambda x: (x["type"] == "file", x["name"].lower()))  # Flip file kind sort folders first
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
+        return sorted(files, key=lambda x: (x["type"] == "file", x["name"].lower()))
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
 @app.get("/api/files/{filename}")
-async def api_get_file(filename: str, sub_path: str = ""):
+async def api_get_file(filename: str, sub_path: str = "", project_id: str = "default"):
     """Serve/View a file from the workspace."""
     import urllib.parse
     filename = urllib.parse.unquote(filename)
     sub_path = urllib.parse.unquote(sub_path)
     
-    target_dir = os.path.abspath(os.path.join(WORKSPACE_DIR, sub_path))
-    if not target_dir.startswith(os.path.abspath(WORKSPACE_DIR)):
+    base_dir = get_project_workspace(project_id)
+    target_dir = os.path.abspath(os.path.join(base_dir, sub_path))
+    if not target_dir.startswith(os.path.abspath(base_dir)):
          return {"status": "error", "message": "Access denied"}
          
     filepath = os.path.join(target_dir, filename)
@@ -242,23 +253,28 @@ async def api_get_file(filename: str, sub_path: str = ""):
     return FileResponse(filepath)
 
 @app.delete("/api/files/{filename}")
-async def api_delete_file(filename: str, sub_path: str = ""):
+async def api_delete_file(filename: str, sub_path: str = "", project_id: str = "default"):
     """Deletes a file and its processed cache from the workspace."""
     try:
         import urllib.parse
         filename = urllib.parse.unquote(filename)
         sub_path = urllib.parse.unquote(sub_path)
         
-        target_dir = os.path.abspath(os.path.join(WORKSPACE_DIR, sub_path))
-        if not target_dir.startswith(os.path.abspath(WORKSPACE_DIR)):
+        base_dir = get_project_workspace(project_id)
+        target_dir = os.path.abspath(os.path.join(base_dir, sub_path))
+        if not target_dir.startswith(os.path.abspath(base_dir)):
              return {"status": "error", "message": "Access denied"}
              
         filepath = os.path.join(target_dir, filename)
         if os.path.exists(filepath):
-            os.remove(filepath)
+            if os.path.isdir(filepath):
+                 import shutil
+                 shutil.rmtree(filepath) # Support deleting folders recursively!
+            else:
+                 os.remove(filepath)
             
         # Clean up cache
-        processed_dir = os.path.join(WORKSPACE_DIR, ".processed")
+        processed_dir = os.path.join(base_dir, ".processed")
         for cache_ext in [".txt", ".md"]:
             cache_path = os.path.join(processed_dir, filename + cache_ext)
             if os.path.exists(cache_path):
@@ -278,11 +294,14 @@ async def api_rename_file(filename: str, body: dict):
         filename = urllib.parse.unquote(filename)
         new_name = body.get("new_name")
         sub_path = urllib.parse.unquote(body.get("sub_path", ""))
+        project_id = body.get("project_id", "default")
+        
         if not new_name:
              return {"status": "error", "message": "new_name is required"}
              
-        target_dir = os.path.abspath(os.path.join(WORKSPACE_DIR, sub_path))
-        if not target_dir.startswith(os.path.abspath(WORKSPACE_DIR)):
+        base_dir = get_project_workspace(project_id)
+        target_dir = os.path.abspath(os.path.join(base_dir, sub_path))
+        if not target_dir.startswith(os.path.abspath(base_dir)):
              return {"status": "error", "message": "Access denied"}
              
         old_path = os.path.join(target_dir, filename)
@@ -296,28 +315,60 @@ async def api_rename_file(filename: str, body: dict):
         os.rename(old_path, new_path)
         
         # Rename cache too
-        processed_dir = os.path.join(WORKSPACE_DIR, ".processed")
+        processed_dir = os.path.join(base_dir, ".processed")
         for cache_ext in [".txt", ".md"]:
-            old_cache = os.path.join(processed_dir, filename + cache_ext)
-            new_cache = os.path.join(processed_dir, new_name + cache_ext)
-            if os.path.exists(old_cache):
-                os.rename(old_cache, new_cache)
-                
-        notify_file_processed(filename, status="deleted") # Trigger remove on old name
-        notify_file_processed(new_name, status="processed") # Trigger add on new name
+             old_cache = os.path.join(processed_dir, filename + cache_ext)
+             new_cache = os.path.join(processed_dir, new_name + cache_ext)
+             if os.path.exists(old_cache):
+                 os.rename(old_cache, new_cache)
+                 
+        notify_file_processed(filename, status="deleted")
+        notify_file_processed(new_name, status="processed")
         
-        return {"status": "ok", "message": f"Renamed {filename} to {new_name}"}
+        return {"status": "ok", "message": f"Renamed to {new_name}"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@app.post("/api/files/{filename}/move")
+async def api_move_file(filename: str, body: dict):
+    """Moves a file or folder into another subdirectory within the project workspace."""
+    try:
+        import urllib.parse
+        filename = urllib.parse.unquote(filename)
+        current_sub_path = urllib.parse.unquote(body.get("current_sub_path", ""))
+        target_sub_path = urllib.parse.unquote(body.get("target_sub_path", ""))
+        project_id = body.get("project_id", "default")
+        
+        base_dir = get_project_workspace(project_id)
+        src_dir = os.path.abspath(os.path.join(base_dir, current_sub_path))
+        dst_dir = os.path.abspath(os.path.join(base_dir, target_sub_path))
+        
+        if not src_dir.startswith(os.path.abspath(base_dir)) or not dst_dir.startswith(os.path.abspath(base_dir)):
+             return {"status": "error", "message": "Access denied"}
+             
+        old_path = os.path.join(src_dir, filename)
+        new_path = os.path.join(dst_dir, filename)
+        
+        if not os.path.exists(old_path):
+             return {"status": "error", "message": f"Source file not found: {filename}"}
+        if os.path.exists(new_path):
+             return {"status": "error", "message": "Destination already contains an item with this name"}
+             
+        os.rename(old_path, new_path)
+        return {"status": "ok", "message": f"Moved {filename} to {target_sub_path}"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
 @app.post("/api/upload")
-async def api_upload_file(file: UploadFile = File(...), sub_path: str = ""):
+async def api_upload_file(file: UploadFile = File(...), sub_path: str = "", project_id: str = "default"):
     """Saves a file directly to the workspace bypassing the graph."""
     try:
         import urllib.parse
         sub_path = urllib.parse.unquote(sub_path)
-        target_dir = os.path.abspath(os.path.join(WORKSPACE_DIR, sub_path))
-        if not target_dir.startswith(os.path.abspath(WORKSPACE_DIR)):
+        base_dir = get_project_workspace(project_id)
+        
+        target_dir = os.path.abspath(os.path.join(base_dir, sub_path))
+        if not target_dir.startswith(os.path.abspath(base_dir)):
              return {"status": "error", "message": "Access denied"}
              
         if not os.path.exists(target_dir):
@@ -337,11 +388,14 @@ async def api_create_folder(body: dict):
         import urllib.parse
         name = body.get("name")
         sub_path = urllib.parse.unquote(body.get("sub_path", ""))
+        project_id = body.get("project_id", "default")
+        
         if not name:
              return {"status": "error", "message": "Folder name is required"}
              
-        target_dir = os.path.abspath(os.path.join(WORKSPACE_DIR, sub_path, name))
-        if not target_dir.startswith(os.path.abspath(WORKSPACE_DIR)):
+        base_dir = get_project_workspace(project_id)
+        target_dir = os.path.abspath(os.path.join(base_dir, sub_path, name))
+        if not target_dir.startswith(os.path.abspath(base_dir)):
              return {"status": "error", "message": "Access denied"}
              
         if os.path.exists(target_dir):

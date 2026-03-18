@@ -221,6 +221,21 @@
             </div>
         </div>
     </div>
+
+    <!-- Text Input Modal (Rename / New Folder) -->
+    <div id="renameModal" class="hidden fixed inset-0 z-[70] items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 flex flex-col gap-4">
+            <h3 id="renameModalTitle" class="font-semibold text-base text-gray-800">Rename</h3>
+            <div class="flex flex-col gap-1.5">
+                <label id="renameModalLabel" class="text-xs text-gray-500 font-medium">New Name</label>
+                <input id="newFilenameInput" type="text" class="w-full border border-bordercolor rounded-xl px-3 py-2 text-sm outline-none focus:border-anthropic transition-colors" placeholder="Enter name..." />
+            </div>
+            <div class="flex gap-2 justify-end">
+                <button id="cancelRenameBtn" class="px-4 py-2 rounded-xl text-sm text-gray-500 hover:bg-gray-100 transition-colors">Cancel</button>
+                <button id="confirmRenameBtn" class="px-4 py-2 rounded-xl text-sm bg-anthropic text-white hover:bg-anthropic/90 transition-colors">Confirm</button>
+            </div>
+        </div>
+    </div>
     <div id="settingsModal" class="hidden fixed inset-0 z-[60] items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden">
             <div class="p-6 border-b border-bordercolor flex items-center justify-between bg-cloud/50">
@@ -338,6 +353,19 @@
             <div class="p-6 border-t border-bordercolor bg-cloud/30 flex justify-end gap-3">
                 <button id="cancelCustomInputBtn" class="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-300 transition-colors">Cancel</button>
                 <button id="confirmCustomInputBtn" class="px-4 py-2 bg-anthropic text-white rounded-lg text-sm font-medium hover:opacity-90 transition-opacity">Confirm</button>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- Custom Confirm Modal -->
+    <div id="customConfirmModal" class="hidden fixed inset-0 z-[80] items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 flex flex-col gap-4">
+            <h3 id="confirmModalTitle" class="font-semibold text-base text-gray-800">Confirm Action</h3>
+            <p id="confirmModalMessage" class="text-sm text-gray-600 leading-relaxed">Are you sure you want to proceed?</p>
+            <div class="flex gap-2 justify-end mt-2">
+                <button id="cancelConfirmBtn" class="px-4 py-2 rounded-xl text-sm text-gray-500 hover:bg-gray-100 transition-colors">Cancel</button>
+                <button id="confirmConfirmBtn" class="px-4 py-2 rounded-xl text-sm bg-red-500 text-white hover:bg-red-600 transition-colors font-medium">Delete</button>
             </div>
         </div>
     </div>

@@ -70,9 +70,9 @@ loadWorkspaceFiles(); // Initial load for Workspace Files panel
 async function loadSettingsData() {
     try {
         const [profileRes, personaRes, memoriesRes] = await Promise.all([
-            fetch('/api/profile'),
-            fetch('/api/persona'),
-            fetch('/api/memories')
+            fetch('http://127.0.0.1:8000/api/profile'),
+            fetch('http://127.0.0.1:8000/api/persona'),
+            fetch('http://127.0.0.1:8000/api/memories')
         ]);
         
         const profile = await profileRes.json();
@@ -133,10 +133,11 @@ function renderMemories(memories) {
 }
 
 async function deleteMemory(fact) {
-    if (!confirm(`Forget this memory: "${fact}"?`)) return;
+    const confirmed = await showCustomConfirm('Forget Memory', `Are you sure you want to forget: "${fact}"?`, true);
+    if (!confirmed) return;
     
     try {
-        const res = await fetch('/api/memories', {
+        const res = await fetch('http://127.0.0.1:8000/api/memories', {
             method: 'DELETE',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ fact })
@@ -156,7 +157,7 @@ addMemoryBtn?.addEventListener('click', async () => {
     if (!fact) return;
     
     try {
-        const res = await fetch('/api/memories', {
+        const res = await fetch('http://127.0.0.1:8000/api/memories', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ fact })
@@ -174,7 +175,7 @@ addMemoryBtn?.addEventListener('click', async () => {
 
 async function loadProjects() {
     try {
-        const res = await fetch('/api/projects');
+        const res = await fetch('http://127.0.0.1:8000/api/projects');
         const projects = await res.json();
         renderProjects(projects);
         
@@ -231,9 +232,11 @@ function renderProjects(projects) {
 
 async function switchProject(projectId, resetChat = true) {
     activeProjectId = projectId;
+    currentSubPath = ''; // Reset folder view on project swap
+    loadWorkspaceFiles(); // Trigger workspace partition reload
     
     try {
-        const res = await fetch(`/api/projects/${projectId}`);
+        const res = await fetch(`http://127.0.0.1:8000/api/projects/${projectId}`);
         const project = await res.json();
         
         // Update UI
@@ -249,7 +252,7 @@ async function switchProject(projectId, resetChat = true) {
         renderProjectChats(project.chats || []);
         
         // Reload projects list to update active state
-        const allRes = await fetch('/api/projects');
+        const allRes = await fetch('http://127.0.0.1:8000/api/projects');
         const allProjects = await allRes.json();
         renderProjects(allProjects);
         
@@ -285,7 +288,7 @@ async function loadChatHistory(sessionId) {
     activeAiMessage = null;
     
     try {
-        const res = await fetch(`/api/history/${sessionId}`);
+        const res = await fetch(`http://127.0.0.1:8000/api/history/${sessionId}`);
         const history = await res.json();
         
         if (history.length === 0) {
@@ -384,7 +387,7 @@ async function switchChat(sessionId) {
     connectWebSocket();
     
     // Refresh project details to update active chat highlighting
-    const res = await fetch(`/api/projects/${activeProjectId}`);
+    const res = await fetch(`http://127.0.0.1:8000/api/projects/${activeProjectId}`);
     const project = await res.json();
     renderProjectChats(project.chats || []);
 }
@@ -394,7 +397,7 @@ async function editChat(chatId, currentName) {
     if (!newName || newName === currentName) return;
     
     try {
-        await fetch(`/api/projects/${activeProjectId}/chats/${chatId}`, {
+        await fetch(`http://127.0.0.1:8000/api/projects/${activeProjectId}/chats/${chatId}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name: newName })
@@ -406,10 +409,11 @@ async function editChat(chatId, currentName) {
 }
 
 async function deleteChat(chatId, chatName) {
-    if (!confirm(`Are you sure you want to delete the chat "${chatName || 'Chat'}"?`)) return;
+    const confirmed = await showCustomConfirm('Delete Chat', `Are you sure you want to delete the chat "${chatName || 'Chat'}"?`, true);
+    if (!confirmed) return;
     
     try {
-        await fetch(`/api/projects/${activeProjectId}/chats/${chatId}`, {
+        await fetch(`http://127.0.0.1:8000/api/projects/${activeProjectId}/chats/${chatId}`, {
             method: 'DELETE'
         });
         switchProject(activeProjectId, false);
@@ -426,7 +430,7 @@ async function editProject(projectId, currentName) {
     if (!newName || newName === currentName) return;
     
     try {
-        await fetch(`/api/projects/${projectId}`, {
+        await fetch(`http://127.0.0.1:8000/api/projects/${projectId}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name: newName })
@@ -438,10 +442,11 @@ async function editProject(projectId, currentName) {
 }
 
 async function deleteProject(projectId, projectName) {
-    if (!confirm(`Are you sure you want to delete the project "${projectName}"? This will delete associated workspace files.`)) return;
+    const confirmed = await showCustomConfirm('Delete Project', `Are you sure you want to delete the project "${projectName}"? This will delete associated workspace files.`, true);
+    if (!confirmed) return;
     
     try {
-        const res = await fetch(`/api/projects/${projectId}`, {
+        const res = await fetch(`http://127.0.0.1:8000/api/projects/${projectId}`, {
             method: 'DELETE'
         });
         const data = await res.json();
@@ -468,7 +473,7 @@ addProjectBtn?.addEventListener('click', async () => {
     const instructions = await showCustomInput('Project Details', 'Project Instructions (optional)');
     
     try {
-        const res = await fetch('/api/projects', {
+        const res = await fetch('http://127.0.0.1:8000/api/projects', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name, instructions })
@@ -515,7 +520,7 @@ saveProfileBtn?.addEventListener('click', async () => {
         llm_model_name: profileLlmModelInput.value
     };
     try {
-        await fetch('/api/profile', {
+        await fetch('http://127.0.0.1:8000/api/profile', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data)
@@ -532,7 +537,7 @@ savePersonaBtn?.addEventListener('click', async () => {
         tone: personaToneInput.value
     };
     try {
-        const res = await fetch('/api/persona', {
+        const res = await fetch('http://127.0.0.1:8000/api/persona', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data)
@@ -579,14 +584,14 @@ newChatBtn.addEventListener('click', async () => {
         
         // Register chat with project in backend
         try {
-            await fetch(`/api/projects/${activeProjectId}/chats`, {
+            await fetch(`http://127.0.0.1:8000/api/projects/${activeProjectId}/chats`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ id: currentSessionId, name: chatName })
             });
             
             // Refresh project details to show new chat in list
-            const res = await fetch(`/api/projects/${activeProjectId}`);
+            const res = await fetch(`http://127.0.0.1:8000/api/projects/${activeProjectId}`);
             const project = await res.json();
             if (projectChatsSection) projectChatsSection.classList.remove('hidden');
             renderProjectChats(project.chats || []);
@@ -635,7 +640,8 @@ fileInput.addEventListener('change', (e) => processFiles(e.target.files));
 // ─── Drag and Drop (Chat Attachments) ───────────────────────────────────────
 chatContainer.addEventListener('dragenter', (e) => {
     e.preventDefault();
-    if (e.dataTransfer.types.includes('Files')) {
+    const types = e.dataTransfer.types;
+    if (types.includes('Files') || types.includes('application/json')) {
         dragOverlay.classList.remove('hidden');
         dragOverlay.classList.add('flex');
     }
@@ -646,7 +652,7 @@ chatContainer.addEventListener('dragover', (e) => {
 });
 
 chatContainer.addEventListener('dragleave', (e) => {
-    // Only hide when leaving the boundaries
+    // Only hide when truly leaving the chat container bounds
     if (!e.relatedTarget || !chatContainer.contains(e.relatedTarget)) {
         dragOverlay.classList.add('hidden');
         dragOverlay.classList.remove('flex');
@@ -1036,6 +1042,8 @@ function finalizeActiveMessage() {
     if (activeAiMessage) {
         addMessageActions(activeAiMessage.contentDiv, activeAiMessage.mainText || activeAiMessage.thoughtText, activeAiMessage.wrapper);
         activeAiMessage = null;
+        // Scroll to bottom after finalizing — tool call cards may have pushed the answer up
+        setTimeout(scrollToBottom, 50);
     }
 }
 
@@ -1435,6 +1443,48 @@ function scrollToBottom() {
     chatContainer.scrollTop = chatContainer.scrollHeight;
 }
 
+// Custom Confirm Modal Helper
+function showCustomConfirm(title, message, isDanger = false) {
+    return new Promise((resolve) => {
+        const modal = document.getElementById('customConfirmModal');
+        const titleEl = document.getElementById('confirmModalTitle');
+        const messageEl = document.getElementById('confirmModalMessage');
+        const confirmBtn = document.getElementById('confirmConfirmBtn');
+        const cancelBtn = document.getElementById('cancelConfirmBtn');
+
+        if (!modal || !titleEl || !messageEl || !confirmBtn || !cancelBtn) {
+            console.error('Custom Confirm Modal elements not found');
+            resolve(confirm(message)); 
+            return;
+        }
+
+        titleEl.textContent = title;
+        messageEl.textContent = message;
+
+        if (isDanger) {
+            confirmBtn.className = "px-4 py-2 rounded-xl text-sm bg-red-500 text-white hover:bg-red-600 transition-colors font-medium";
+            confirmBtn.textContent = "Delete";
+        } else {
+            confirmBtn.className = "px-4 py-2 rounded-xl text-sm bg-anthropic text-white hover:bg-opacity-90 transition-opacity font-medium";
+            confirmBtn.textContent = "Confirm";
+        }
+
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+
+        const cleanup = (result) => {
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+            confirmBtn.onclick = null;
+            cancelBtn.onclick = null;
+            resolve(result);
+        };
+
+        confirmBtn.onclick = () => cleanup(true);
+        cancelBtn.onclick = () => cleanup(false);
+    });
+}
+
 // Custom Input Modal Helper
 function showCustomInput(title, label, defaultValue = '') {
     return new Promise((resolve) => {
@@ -1507,7 +1557,7 @@ async function loadWorkspaceFiles() {
     if (!listEl) return;
     
     try {
-        const res = await fetch(`/api/files?sub_path=${encodeURIComponent(currentSubPath)}`);
+        const res = await fetch(`http://127.0.0.1:8000/api/files?sub_path=${encodeURIComponent(currentSubPath)}&project_id=${activeProjectId}`);
         const files = await res.json();
         renderWorkspaceFiles(files);
         renderBreadcrumbs();
@@ -1570,6 +1620,28 @@ function renderWorkspaceFiles(files) {
         } else if (file.type === 'folder') {
              item.classList.add('cursor-pointer');
              item.onclick = () => navigateToFolder(currentSubPath ? `${currentSubPath}/${file.name}` : file.name);
+             
+             // Move Drag-Drop support into folder items
+             item.addEventListener('dragover', (e) => {
+                 e.preventDefault();
+                 item.classList.add('bg-yellow-50/50', 'border-yellow-200');
+             });
+             item.addEventListener('dragleave', () => {
+                 item.classList.remove('bg-yellow-50/50', 'border-yellow-200');
+             });
+             item.addEventListener('drop', async (e) => {
+                 e.preventDefault();
+                 item.classList.remove('bg-yellow-50/50', 'border-yellow-200');
+                 const data = e.dataTransfer.getData('application/json');
+                 if (data) {
+                      try {
+                          const dragItem = JSON.parse(data);
+                          if (dragItem.source === 'workspace' && dragItem.name !== file.name) {
+                               await moveWorkspaceFile(dragItem.name, dragItem.path, currentSubPath ? `${currentSubPath}/${file.name}` : file.name);
+                          }
+                      } catch(err) {}
+                 }
+             });
         }
         
         const isProcessing = file.status === 'processing';
@@ -1594,9 +1666,11 @@ function renderWorkspaceFiles(files) {
                 </div>
             </div>
             <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                ${!isFolder ? `
                 <button class="view-file-btn p-1 rounded-md hover:bg-gray-100 text-gray-400 hover:text-black" title="View">
                     <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0z"/><circle cx="12" cy="12" r="3"/></svg>
                 </button>
+                ` : ''}
                 <button class="rename-file-btn p-1 rounded-md hover:bg-gray-100 text-gray-400 hover:text-anthropic" title="Rename">
                     <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
                 </button>
@@ -1606,7 +1680,8 @@ function renderWorkspaceFiles(files) {
             </div>
         `;
         
-        item.querySelector('.view-file-btn').onclick = (e) => { e.stopPropagation(); viewWorkspaceFile(file.name); };
+        const viewBtn = item.querySelector('.view-file-btn');
+        if (viewBtn) viewBtn.onclick = (e) => { e.stopPropagation(); viewWorkspaceFile(file.name); };
         item.querySelector('.rename-file-btn').onclick = (e) => { e.stopPropagation(); renameWorkspaceFile(file.name); };
         item.querySelector('.delete-file-btn').onclick = (e) => { e.stopPropagation(); deleteWorkspaceFile(file.name); };
         
@@ -1615,9 +1690,10 @@ function renderWorkspaceFiles(files) {
 }
 
 async function deleteWorkspaceFile(name) {
-    if (!confirm(`Delete file "${name}" from workspace?`)) return;
+    const confirmed = await showCustomConfirm('Delete File', `Are you sure you want to delete "${name}" from the workspace?`, true);
+    if (!confirmed) return;
     try {
-        await fetch(`/api/files/${encodeURIComponent(name)}?sub_path=${encodeURIComponent(currentSubPath)}`, { method: 'DELETE' });
+        await fetch(`http://127.0.0.1:8000/api/files/${encodeURIComponent(name)}?sub_path=${encodeURIComponent(currentSubPath)}&project_id=${activeProjectId}`, { method: 'DELETE' });
         loadWorkspaceFiles();
     } catch (e) {
         console.error('Failed to delete file:', e);
@@ -1628,14 +1704,35 @@ async function renameWorkspaceFile(name) {
     const newName = await showCustomInput('Rename File', 'New Name', name);
     if (!newName || newName === name) return;
     try {
-        await fetch(`/api/files/${encodeURIComponent(name)}/rename`, {
+        await fetch(`http://127.0.0.1:8000/api/files/${encodeURIComponent(name)}/rename`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ new_name: newName, sub_path: currentSubPath })
+            body: JSON.stringify({ new_name: newName, sub_path: currentSubPath, project_id: activeProjectId })
         });
         loadWorkspaceFiles();
     } catch (e) {
         console.error('Failed to rename file:', e);
+    }
+}
+
+async function moveWorkspaceFile(filename, fullSrcPath, targetSubPath) {
+    try {
+        let current_sub = "";
+        if (fullSrcPath.includes('/')) {
+             current_sub = fullSrcPath.substring(0, fullSrcPath.lastIndexOf('/'));
+        }
+        await fetch(`http://127.0.0.1:8000/api/files/${encodeURIComponent(filename)}/move`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                 current_sub_path: current_sub, 
+                 target_sub_path: targetSubPath, 
+                 project_id: activeProjectId 
+            })
+        });
+        loadWorkspaceFiles();
+    } catch (e) {
+        console.error('Move failed:', e);
     }
 }
 
@@ -1661,7 +1758,7 @@ workspaceFileInput?.addEventListener('change', async (e) => {
         formData.append('file', file);
         // Upload immediately via POST
         try {
-            await fetch(`/api/upload?sub_path=${encodeURIComponent(currentSubPath)}`, { method: 'POST', body: formData });
+            await fetch(`http://127.0.0.1:8000/api/upload?sub_path=${encodeURIComponent(currentSubPath)}&project_id=${activeProjectId}`, { method: 'POST', body: formData });
         } catch (err) {
             console.error('Upload failed:', err);
         }
@@ -1677,8 +1774,10 @@ let workspaceDragCounter = 0; // Fixes nested bubbling locks
 if (workspacePanel && workspaceDropZone) {
     workspacePanel.addEventListener('dragenter', (e) => {
         e.preventDefault(); e.stopPropagation();
-        workspaceDragCounter++;
-        workspaceDropZone.classList.remove('hidden');
+        if (e.dataTransfer.types.includes('Files')) {
+            workspaceDragCounter++;
+            workspaceDropZone.classList.remove('hidden');
+        }
     });
 
     workspacePanel.addEventListener('dragover', (e) => {
@@ -1712,7 +1811,7 @@ if (workspacePanel && workspaceDropZone) {
             const formData = new FormData();
             formData.append('file', file);
             try {
-                await fetch(`/api/upload?sub_path=${encodeURIComponent(currentSubPath)}`, { method: 'POST', body: formData });
+                await fetch(`http://127.0.0.1:8000/api/upload?sub_path=${encodeURIComponent(currentSubPath)}&project_id=${activeProjectId}`, { method: 'POST', body: formData });
             } catch (err) {
                 console.error('Upload failed:', err);
             }
@@ -1735,18 +1834,18 @@ async function viewWorkspaceFile(name) {
     modal.classList.remove('hidden');
     modal.classList.add('flex');
     
-    downloadBtn.onclick = () => window.open(`/api/files/${encodeURIComponent(name)}`, '_blank');
+    const fileUrl = `/api/files/${encodeURIComponent(name)}?sub_path=${encodeURIComponent(currentSubPath)}&project_id=${activeProjectId}`;
+    downloadBtn.onclick = () => window.open(fileUrl, '_blank');
     
     const ext = name.split('.').pop().toLowerCase();
     
     if (ext === 'pdf') {
-        contentEl.innerHTML = `<iframe src="/api/files/${encodeURIComponent(name)}" class="w-full h-full border-0"></iframe>`;
+        contentEl.innerHTML = `<iframe src="${fileUrl}" class="w-full h-full border-0"></iframe>`;
     } else if (['png', 'jpg', 'jpeg', 'gif', 'svg'].includes(ext)) {
-        contentEl.innerHTML = `<img src="/api/files/${encodeURIComponent(name)}" class="max-w-full max-h-full object-contain p-4" />`;
+        contentEl.innerHTML = `<img src="${fileUrl}" class="max-w-full max-h-full object-contain p-4" />`;
     } else {
-        // Assume text file for now (py, txt, md, csv)
         try {
-            const res = await fetch(`/api/files/${encodeURIComponent(name)}`);
+            const res = await fetch(fileUrl);
             const text = await res.text();
             contentEl.innerHTML = `<pre class="w-full h-full p-6 text-xs text-gray-700 font-mono bg-white overflow-auto whitespace-pre-wrap">${escapeHtml(text)}</pre>`;
         } catch (e) {
@@ -1821,10 +1920,10 @@ document.getElementById('newFolderBtn')?.addEventListener('click', async () => {
     if (!name) return;
     
     try {
-        const res = await fetch('/api/folders', {
+        const res = await fetch('http://127.0.0.1:8000/api/folders', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: name, sub_path: currentSubPath })
+            body: JSON.stringify({ name: name, sub_path: currentSubPath, project_id: activeProjectId })
         });
         const data = await res.json();
         if (data.status === 'ok') {

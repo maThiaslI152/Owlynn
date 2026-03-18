@@ -122,6 +122,7 @@ CORE RULES:
 Do NOT output multiple tool calls in a row and finish immediate after the block.
 7. PRESENTATION: Avoid complex ASCII art with frame/box drawing characters. For grids, matrixes, or tables, strictly use Standard Markdown Tables or simple lists to stay fast.
 8. PYTHON TIP: Inside f-string expressions (e.g. f"{var}"), do NOT use backslashes (`\`). Define the escaped string variable outside the f-string first.
+9. WEB FALLBACK: If you have already read a file (or listed files) and the information is NOT in the local files, STOP reading more files. Instead, immediately call `web_search` with a clear, specific query. Do NOT re-read the same file or list files again. Local files → web search, not local files → more local files.
 """
 
     else:
@@ -379,6 +380,59 @@ Do NOT output multiple tool calls in a row and finish immediate after the block.
                     "id": f"call_forced_{len(messages)}"
                 }]
                 modified = True
+
+    # --- File Loop Detector: force web_search if the AI keeps re-reading files with no result ---
+    if mode != "tools_off" and not new_tool_calls:
+        # Collect the last few tool messages to check for file-reading loops
+        recent_tool_msgs = [
+            m for m in messages[-8:]
+            if hasattr(m, 'type') and m.type == 'tool'
+        ]
+        file_tool_names = {"read_workspace_file", "list_workspace_files", "search_workspace_files"}
+        file_tool_calls = [
+            m for m in recent_tool_msgs
+            if getattr(m, 'name', '') in file_tool_names
+        ]
+        already_web_searched = any(
+            getattr(m, 'name', '') == 'web_search' for m in recent_tool_msgs
+        )
+
+        if file_tool_calls and not already_web_searched:
+            # Trigger 1: Any file read returned a thin/empty result (< 300 chars)
+            thin_results = [
+                m for m in file_tool_calls
+                if isinstance(getattr(m, 'content', ''), str) and len(m.content.strip()) < 300
+            ]
+            # Trigger 2: The same file was read more than once (duplicate loop)
+            read_args = [
+                getattr(m, 'content', '') for m in file_tool_calls
+                if getattr(m, 'name', '') == 'read_workspace_file'
+            ]
+            # Detect duplicate tool_call_ids or same content returned twice
+            seen_contents = set()
+            duplicate_reads = False
+            for content in read_args:
+                if content in seen_contents:
+                    duplicate_reads = True
+                    break
+                seen_contents.add(content)
+
+            should_fallback = len(thin_results) >= 1 or duplicate_reads
+
+            if should_fallback:
+                last_human = next(
+                    (m.content for m in reversed(messages) if hasattr(m, "type") and m.type == "human"), ""
+                )
+                if last_human and isinstance(last_human, str):
+                    logger.info("File loop detected — falling back to web_search")
+                    new_content = ""
+                    new_tool_calls = [{
+                        "name": "web_search",
+                        "args": {"query": last_human},
+                        "id": f"call_webfallback_{len(messages)}"
+                    }]
+                    modified = True
+
 
     if new_content and new_tool_calls:
         # If we have tool calls, we are VERY aggressive about stripping pre-tool monologue

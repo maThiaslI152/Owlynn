@@ -1,0 +1,41 @@
+{
+  "build": {
+    "distDir": "../frontend",
+    "devPath": "../frontend"
+  },
+  "package": {
+    "version": "0.1.0",
+    "productName": "Owlynn"
+  },
+  "tauri": {
+    "allowlist": {
+      "all": true
+    },
+    "bundle": {
+      "active": true,
+      "category": "DeveloperTool",
+      "identifier": "com.owlynn.app",
+      "icon": [
+        "icons/32x32.png",
+        "icons/128x128.png",
+        "icons/128x128@2x.png",
+        "icons/icon.icns",
+        "icons/icon.ico"
+      ],
+      "targets": "all"
+    },
+
+    "security": {
+      "csp": "default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ws://127.0.0.1:8000 http://127.0.0.1:8000;"
+    },
+    "windows": [
+      {
+        "fullscreen": false,
+        "height": 800,
+        "resizable": true,
+        "title": "Owlynn",
+        "width": 1000
+      }
+    ]
+  }
+}

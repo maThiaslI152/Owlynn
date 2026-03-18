@@ -44,11 +44,22 @@ Before running the agent, start your local LLM server.
    ```
 
 ### 3. Start Agent Backend & Frontend
+
+#### Option A: Browser Web App
 Run the FastAPI application:
 ```bash
 ./run.sh
 ```
-*This starts the backend on `127.0.0.1:8000` and serves the frontend.*
+*This starts the backend on `127.0.0.1:8000` and serves the frontend in your browser at [http://127.0.0.1:8000](http://127.0.0.1:8000).*
+
+#### Option B: Tauri Desktop App
+Run the integrated runner script:
+```bash
+chmod +x run_tauri.sh
+./run_tauri.sh
+```
+*This starts the background FastAPI backend and then launches the native desktop window using Tauri.*
+
 
 ### 4. Access the UI
 Open your browser and navigate to:
