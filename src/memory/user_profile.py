@@ -20,7 +20,21 @@ _DEFAULTS = {
     "small_llm_base_url": "http://127.0.0.1:1234/v1",
     "small_llm_model_name": "nvidia/nemotron-3-nano-4b",
     "large_llm_base_url": "http://127.0.0.1:1234/v1",
-    "large_llm_model_name": "qwen/qwen3.5-9b"
+    "large_llm_model_name": "qwen/qwen3.5-9b",
+    # New system settings
+    "system_prompt": "",
+    "custom_instructions": "",
+    # New memory settings
+    "short_term_enabled": True,
+    "long_term_enabled": True,
+    # New inference settings
+    "temperature": 0.7,
+    "top_p": 0.9,
+    "max_tokens": 2048,
+    "top_k": 40,
+    "streaming_enabled": True,
+    "show_thinking": False,
+    "show_tool_execution": True
 }
 
 VALID_FIELDS = {
@@ -34,7 +48,21 @@ VALID_FIELDS = {
     "small_llm_base_url": str,
     "small_llm_model_name": str,
     "large_llm_base_url": str,
-    "large_llm_model_name": str
+    "large_llm_model_name": str,
+    # New system settings
+    "system_prompt": str,
+    "custom_instructions": str,
+    # New memory settings
+    "short_term_enabled": bool,
+    "long_term_enabled": bool,
+    # New inference settings
+    "temperature": (int, float),
+    "top_p": (int, float),
+    "max_tokens": int,
+    "top_k": int,
+    "streaming_enabled": bool,
+    "show_thinking": bool,
+    "show_tool_execution": bool
 }
 
 

@@ -1,67 +1,73 @@
 """
-Router Node
------------
-Uses the Small LLM to decide the next path: simple, complex, tool, or memory.
+Router Node - Optimized for M4
+-------------------------------
+Uses the Small LLM to quickly decide: simple response or complex reasoning.
+Simplified from 4 routes to 2 for M4 efficiency.
 """
 
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from src.agent.state import AgentState
-from src.agent.llm import small_llm
+from src.agent.llm import get_small_llm
 import json
 import re
 import logging
 
 logger = logging.getLogger(__name__)
 
-ROUTER_PROMPT = """
-Analyze the user's input and determine the BEST routing action.
-You MUST output EXACTLY ONE JSON block matching this format:
+# Streamlined router prompt for faster decisions on M4
+ROUTER_PROMPT = """You are a routing expert. Analyze this message and decide:
+- "simple": Greeting, casual chat, factual Q&A (just explain briefly)
+- "complex": Needs reasoning, problem solving, writing, coding, calculations
 
-{{
-  "routing": "simple | complex | tool | memory",
-  "reason": "short explanation",
-  "confidence": 0.9
-}}
+Output ONLY this JSON format:
+{{"routing": "simple" OR "complex", "confidence": 0.0-1.0}}
 
-Routing Criteria:
-- simple: Greetings, casual chat, thanking you, or simple direct questions.
-- memory: Questions explicitly asking about PAST conversations, user preferences, or self-recollection.
-- tool: File manipulation (read/write), executing shell commands, or running python code.
-- complex: Everything else requiring deep reasoning, calculations, coding help, or multi-step synthesis.
+Message: "{user_input}"
 
-USER INPUT: "{user_input}"
-
-JSON RESPONSE:"""
+JSON:"""
 
 def parse_routing(content: str) -> str:
+    """Extract routing decision from LLM response."""
     try:
         match = re.search(r'\{.*\}', content, re.DOTALL)
         if match:
-             parsed = json.loads(match.group(0))
-             decision = parsed.get("routing", "complex").lower().strip()
-             if decision in ["simple", "complex", "tool", "memory"]:
-                 return decision
+            parsed = json.loads(match.group(0))
+            decision = parsed.get("routing", "complex").lower().strip()
+            if decision in ["simple", "complex"]:
+                return decision
     except Exception:
-         pass
-    return "complex"  # Safe default
+        pass
+    return "complex"  # Safe default (use large model if unsure)
 
 async def router_node(state: AgentState) -> AgentState:
+    """Route to simple or complex path based on quick analysis."""
     messages = state.get("messages", [])
+    if not messages:
+        return {"route": "complex"}
+    
     user_input = messages[-1].content if messages else ""
     
-    # Keyword check fallback for forcing memory/context routing
-    memory_keywords = ["last time", "as before", "remember when", "we talked about", "you said"]
-    force_memory = any(kw in str(user_input).lower() for kw in memory_keywords)
-
-    if force_memory:
-         state["route"] = "memory"
-         logger.info("[router] → Forcing memory route due to keywords")
-         return state
-
-    response = await small_llm.ainvoke([
-        SystemMessage(content=ROUTER_PROMPT.format(user_input=user_input)),
-    ])
+    # Quick keyword check to bypass LLM for obvious cases (saves ~1s)
+    simple_keywords = [
+        "hello", "hi", "hey", "thanks", "thank you", "bye", "goodbye",
+        "what time", "what date", "what's today", "weather"
+    ]
+    for kw in simple_keywords:
+        if kw in user_input.lower():
+            logger.info("[router] Simple path - keyword match")
+            return {"route": "simple"}
     
-    decision = parse_routing(response.content)
-    print(f"[router] → {decision}")
+    # Get small LLM (pooled instance - no reinit overhead)
+    small_llm = await get_small_llm()
+    
+    try:
+        response = await small_llm.ainvoke([
+            SystemMessage(content=ROUTER_PROMPT.format(user_input=user_input[:200])),  # Limit input
+        ])
+        decision = parse_routing(response.content)
+    except Exception as e:
+        logger.error(f"[router] Error during routing: {e}")
+        decision = "complex"  # Safe fallback
+    
+    logger.info(f"[router] → {decision}")
     return {"route": decision}

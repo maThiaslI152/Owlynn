@@ -20,6 +20,14 @@ from src.memory.user_profile import get_profile, update_profile
 from src.memory.persona import get_persona, update_persona_field
 from src.memory.memory_manager import load_memories, save_memory, delete_memory
 from src.memory.project import project_manager
+from src.memory.personal_assistant import (
+    get_relevant_topics,
+    get_user_interests_summary,
+    load_conversations_history,
+    get_memory_context_for_prompt,
+    track_topic,
+    update_interests,
+)
 from src.config.settings import WORKSPACE_DIR
 
 def get_project_workspace(project_id: str = "default") -> str:
@@ -131,6 +139,87 @@ async def api_update_persona(body: dict):
             pass
     return get_persona()
 
+@app.get("/api/system-settings")
+async def api_get_system_settings():
+    """Get system prompts and instructions."""
+    try:
+        profile = get_profile()
+        persona = get_persona()
+        return {
+            "system_prompt": profile.get("system_prompt", ""),
+            "custom_instructions": profile.get("custom_instructions", ""),
+            "name": persona.get("name", "Owlynn"),
+            "tone": persona.get("tone", "friendly")
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.post("/api/system-settings")
+async def api_update_system_settings(body: dict):
+    """Update system prompts and instructions."""
+    try:
+        update_profile("system_prompt", body.get("system_prompt", ""))
+        update_profile("custom_instructions", body.get("custom_instructions", ""))
+        if body.get("name"):
+            update_persona_field("name", body["name"])
+        if body.get("tone"):
+            update_persona_field("tone", body["tone"])
+        return {"status": "ok", "message": "System settings saved"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@app.get("/api/memory-settings")
+async def api_get_memory_settings():
+    """Get memory settings."""
+    try:
+        profile = get_profile()
+        return {
+            "short_term_enabled": profile.get("short_term_enabled", True),
+            "long_term_enabled": profile.get("long_term_enabled", True)
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.post("/api/memory-settings")
+async def api_update_memory_settings(body: dict):
+    """Update memory settings."""
+    try:
+        if "short_term_enabled" in body:
+            update_profile("short_term_enabled", body["short_term_enabled"])
+        if "long_term_enabled" in body:
+            update_profile("long_term_enabled", body["long_term_enabled"])
+        return {"status": "ok", "message": "Memory settings saved"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@app.get("/api/advanced-settings")
+async def api_get_advanced_settings():
+    """Get inference and behavior settings."""
+    try:
+        profile = get_profile()
+        return {
+            "temperature": profile.get("temperature", 0.7),
+            "top_p": profile.get("top_p", 0.9),
+            "max_tokens": profile.get("max_tokens", 2048),
+            "top_k": profile.get("top_k", 40),
+            "streaming_enabled": profile.get("streaming_enabled", True),
+            "show_thinking": profile.get("show_thinking", False),
+            "show_tool_execution": profile.get("show_tool_execution", True)
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.post("/api/advanced-settings")
+async def api_update_advanced_settings(body: dict):
+    """Update inference and behavior settings."""
+    try:
+        for field in ["temperature", "top_p", "max_tokens", "top_k", "streaming_enabled", "show_thinking", "show_tool_execution"]:
+            if field in body:
+                update_profile(field, body[field])
+        return {"status": "ok", "message": "Advanced settings saved"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
 @app.get("/api/memories")
 async def api_get_memories():
     return load_memories()
@@ -150,6 +239,74 @@ async def api_delete_memory(body: dict):
         return {"status": "error", "message": "Fact required"}
     success = delete_memory(fact)
     return {"status": "ok" if success else "error", "memories": load_memories()}
+
+# Personal Assistant Endpoints - Topics, Interests, Conversation History
+
+@app.get("/api/topics")
+async def api_get_topics():
+    """Get tracked topics with relevance scores and recency."""
+    try:
+        topics = get_relevant_topics(limit=10)
+        return {"status": "ok", "topics": topics}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@app.get("/api/interests")
+async def api_get_interests():
+    """Get detected interests with occurrence counts."""
+    try:
+        interests = get_user_interests_summary()
+        return {"status": "ok", "interests": interests}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@app.get("/api/conversations")
+async def api_get_conversations(limit: int = 10):
+    """Get recent conversation history with summaries."""
+    try:
+        conversations = load_conversations_history(limit=limit)
+        return {"status": "ok", "conversations": conversations}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@app.get("/api/memory-context")
+async def api_get_memory_context():
+    """Get comprehensive memory context for UI display."""
+    try:
+        context = get_memory_context_for_prompt()
+        return {
+            "status": "ok",
+            "memory_context": context,
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@app.post("/api/topics/track")
+async def api_track_topic(body: dict):
+    """Manually track a topic of interest."""
+    try:
+        topic = body.get("topic")
+        category = body.get("category", "other")
+        if not topic:
+            return {"status": "error", "message": "Topic required"}
+        result = track_topic(topic, category)
+        topics = get_relevant_topics(limit=10)
+        return {"status": "ok", "message": result, "topics": topics}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@app.post("/api/interests/update")
+async def api_update_interests(body: dict):
+    """Manually update detected interests."""
+    try:
+        interests = body.get("interests", {})
+        if not interests:
+            return {"status": "error", "message": "Interests required"}
+        update_interests(interests)
+        updated = get_user_interests_summary()
+        return {"status": "ok", "interests": updated}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 @app.get("/api/projects")
 async def api_list_projects():

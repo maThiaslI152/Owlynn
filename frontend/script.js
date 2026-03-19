@@ -8,6 +8,76 @@ let activeMode = 'tools_on'; // default: 'tools_on' or 'tools_off'
 let activeProjectId = 'default';
 let activeAiMessage = null; 
 let lastHumanMessage = ""; // For regenerate
+let currentModelUsed = "unknown"; // Track which model is being used
+
+// Helper function to render tool execution cards
+function renderToolExecution(toolName, status = 'running', input = null, output = null, error = null) {
+    const card = document.createElement('div');
+    card.className = 'tool-execution-card';
+    
+    let statusBadge = '';
+    if (status === 'running') {
+        statusBadge = '<span class="tool-status-badge tool-status-running"><span class="w-2 h-2 rounded-full bg-yellow-600 animate-pulse"></span>Running...</span>';
+    } else if (status === 'success') {
+        statusBadge = '<span class="tool-status-badge tool-status-success"><span class="w-2 h-2 rounded-full bg-green-600"></span>Completed</span>';
+    } else if (status === 'error') {
+        statusBadge = '<span class="tool-status-badge tool-status-error"><span class="w-2 h-2 rounded-full bg-red-600"></span>Failed</span>';
+    }
+    
+    let inputHtml = '';
+    if (input) {
+        inputHtml = `<div class="tool-input"><strong>Input:</strong><div class="mt-1 text-gray-700">${DOMPurify.sanitize(input)}</div></div>`;
+    }
+    
+    let outputHtml = '';
+    if (output) {
+        outputHtml = `<div class="tool-output"><strong>Output:</strong><div class="mt-1 text-gray-700">${DOMPurify.sanitize(output)}</div></div>`;
+    }
+    
+    let errorHtml = '';
+    if (error) {
+        errorHtml = `<div class="tool-input tool-error"><strong>Error:</strong><div class="mt-1 text-red-700">${DOMPurify.sanitize(error)}</div></div>`;
+    }
+    
+    card.innerHTML = `
+        <div class="tool-header">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 1 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+            <span>${toolName}</span>
+            ${statusBadge}
+        </div>
+        ${inputHtml}
+        ${outputHtml}
+        ${errorHtml}
+    `;
+    
+    return card;
+}
+
+// Helper function to render error messages
+function renderErrorMessage(title, message, details = null) {
+    const div = document.createElement('div');
+    div.className = 'error-message';
+    
+    let html = `<strong>⚠️ ${DOMPurify.sanitize(title)}</strong><p>${DOMPurify.sanitize(message)}</p>`;
+    if (details) {
+        html += `<div class="text-sm mt-2 opacity-90"><code>${DOMPurify.sanitize(details)}</code></div>`;
+    }
+    
+    div.innerHTML = html;
+    return div;
+}
+
+// Helper function for loading skeleton
+function renderLoadingSkeleton() {
+    const div = document.createElement('div');
+    div.className = 'space-y-2';
+    div.innerHTML = `
+        <div class="skeleton-loader" style="width: 85%;"></div>
+        <div class="skeleton-loader" style="width: 95%;"></div>
+        <div class="skeleton-loader" style="width: 70%;"></div>
+    `;
+    return div;
+}
 
 // DOM Elements
 const chatContainer = document.getElementById('chatContainer');
@@ -69,15 +139,25 @@ loadWorkspaceFiles(); // Initial load for Workspace Files panel
 
 async function loadSettingsData() {
     try {
-        const [profileRes, personaRes, memoriesRes] = await Promise.all([
+        const [profileRes, personaRes, memoriesRes, systemRes, advancedRes, topicsRes, interestsRes, conversationsRes] = await Promise.all([
             fetch('http://127.0.0.1:8000/api/profile'),
             fetch('http://127.0.0.1:8000/api/persona'),
-            fetch('http://127.0.0.1:8000/api/memories')
+            fetch('http://127.0.0.1:8000/api/memories'),
+            fetch('http://127.0.0.1:8000/api/system-settings').catch(() => null),
+            fetch('http://127.0.0.1:8000/api/advanced-settings').catch(() => null),
+            fetch('http://127.0.0.1:8000/api/topics').catch(() => null),
+            fetch('http://127.0.0.1:8000/api/interests').catch(() => null),
+            fetch('http://127.0.0.1:8000/api/conversations').catch(() => null)
         ]);
         
         const profile = await profileRes.json();
         const persona = await personaRes.json();
         const memories = await memoriesRes.json();
+        const systemSettings = systemRes ? await systemRes.json() : {};
+        const advancedSettings = advancedRes ? await advancedRes.json() : {};
+        const topicsData = topicsRes ? await topicsRes.json() : { topics: [] };
+        const interestsData = interestsRes ? await interestsRes.json() : { interests: [] };
+        const conversationsData = conversationsRes ? await conversationsRes.json() : { conversations: [] };
 
         // Populate Profile
         if (profileNameInput) profileNameInput.value = profile.name || '';
@@ -95,9 +175,47 @@ async function loadSettingsData() {
         `;
         if (agentRoleDisplay) agentRoleDisplay.innerText = persona.role || '';
 
+        // Populate System Settings
+        if (systemPromptInput) {
+            systemPromptInput.value = systemSettings.system_prompt || DEFAULT_SYSTEM_PROMPT;
+        }
+        if (customInstructionsInput) {
+            customInstructionsInput.value = systemSettings.custom_instructions || '';
+        }
+
+        // Populate Advanced Settings
+        if (temperatureSlider) {
+            temperatureSlider.value = advancedSettings.temperature || 0.7;
+            if (temperatureValue) temperatureValue.textContent = parseFloat(temperatureSlider.value).toFixed(1);
+        }
+        if (topPSlider) {
+            topPSlider.value = advancedSettings.top_p || 0.9;
+            if (topPValue) topPValue.textContent = parseFloat(topPSlider.value).toFixed(2);
+        }
+        if (maxTokensSlider) {
+            maxTokensSlider.value = advancedSettings.max_tokens || 2048;
+            if (maxTokensValue) maxTokensValue.textContent = parseInt(maxTokensSlider.value);
+        }
+        if (topKSlider) {
+            topKSlider.value = advancedSettings.top_k || 40;
+            if (topKValue) topKValue.textContent = parseInt(topKSlider.value);
+        }
+        if (streamingToggle) streamingToggle.checked = advancedSettings.streaming_enabled !== false;
+        if (thinkingToggle) thinkingToggle.checked = advancedSettings.show_thinking || false;
+        if (toolVisibilityToggle) toolVisibilityToggle.checked = advancedSettings.show_tool_execution !== false;
+
         // Populate Memories
         if (memoriesCountEl) memoriesCountEl.innerText = memories.length || 0;
         renderMemories(memories);
+
+        // Populate Topics
+        renderTrackedTopics(topicsData.topics || []);
+
+        // Populate Interests
+        renderDetectedInterests(interestsData.interests || []);
+
+        // Populate Conversations
+        renderRecentConversations(conversationsData.conversations || []);
 
     } catch (e) {
         console.error('Failed to load settings data:', e);
@@ -150,6 +268,72 @@ async function deleteMemory(fact) {
     } catch (e) {
         console.error('Failed to delete memory:', e);
     }
+}
+
+function renderTrackedTopics(topics) {
+    const topicsEl = document.getElementById('trackedTopics');
+    if (!topicsEl) return;
+    
+    topicsEl.innerHTML = '';
+    if (topics.length === 0) {
+        topicsEl.innerHTML = '<span class="text-[12px] text-gray-500 italic">No topics tracked yet. They will appear as you chat.</span>';
+        return;
+    }
+    
+    topics.forEach(topic => {
+        const badge = document.createElement('div');
+        badge.className = 'inline-flex items-center gap-2 px-3 py-1.5 bg-blue-100 text-blue-700 rounded-full text-[12px] font-medium border border-blue-200';
+        badge.innerHTML = `
+            <span>🏷️ ${topic.topic || topic}</span>
+            ${topic.count ? `<span class="text-[10px] bg-blue-200 px-1.5 py-0.5 rounded-full">${topic.count}</span>` : ''}
+        `;
+        topicsEl.appendChild(badge);
+    });
+}
+
+function renderDetectedInterests(interests) {
+    const interestsEl = document.getElementById('detectedInterests');
+    if (!interestsEl) return;
+    
+    interestsEl.innerHTML = '';
+    if (interests.length === 0) {
+        interestsEl.innerHTML = '<span class="text-[12px] text-gray-500 italic">No interests detected yet. I\'ll learn about you as we chat.</span>';
+        return;
+    }
+    
+    interests.forEach(interest => {
+        const chip = document.createElement('div');
+        chip.className = 'inline-flex items-center gap-2 px-3 py-1.5 bg-green-100 text-green-700 rounded-full text-[12px] font-medium border border-green-200';
+        const interestLabel = interest.interest || interest;
+        chip.innerHTML = `
+            <span>✨ ${interestLabel}</span>
+            ${interest.count ? `<span class="text-[10px] bg-green-200 px-1.5 py-0.5 rounded-full">${interest.count}</span>` : ''}
+        `;
+        interestsEl.appendChild(chip);
+    });
+}
+
+function renderRecentConversations(conversations) {
+    const conversationsEl = document.getElementById('recentConversations');
+    if (!conversationsEl) return;
+    
+    conversationsEl.innerHTML = '';
+    if (conversations.length === 0) {
+        conversationsEl.innerHTML = '<span class="text-[12px] text-gray-500 italic">No conversations recorded yet.</span>';
+        return;
+    }
+    
+    conversations.slice(0, 5).forEach((conv, idx) => {
+        const card = document.createElement('div');
+        card.className = 'p-2.5 bg-white border border-purple-200 rounded-lg hover:border-purple-300 hover:bg-purple-50 transition-colors cursor-pointer';
+        const summary = (conv.summary || conv.user_message || 'Conversation').substring(0, 60) + '...';
+        const timestamp = conv.timestamp ? new Date(conv.timestamp).toLocaleDateString() : 'Recent';
+        card.innerHTML = `
+            <p class="text-[12px] font-medium text-gray-700">${summary}</p>
+            <p class="text-[10px] text-gray-500 mt-1">${timestamp}</p>
+        `;
+        conversationsEl.appendChild(card);
+    });
 }
 
 addMemoryBtn?.addEventListener('click', async () => {
@@ -511,6 +695,187 @@ settingsModal?.addEventListener('click', (e) => {
     }
 });
 
+// ===== SETTINGS TABS FUNCTIONALITY =====
+const settingsTabs = document.querySelectorAll('.settings-tab');
+const tabContents = document.querySelectorAll('.settings-tab-content');
+
+settingsTabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+        const tabName = tab.getAttribute('data-tab');
+        
+        // Remove active class from all tabs and contents
+        settingsTabs.forEach(t => t.classList.remove('active'));
+        tabContents.forEach(c => c.classList.remove('active'));
+        
+        // Add active class to clicked tab and corresponding content
+        tab.classList.add('active');
+        document.querySelector(`.settings-tab-content[data-tab="${tabName}"]`)?.classList.add('active');
+        
+        // Refresh memory data when Memory tab is opened
+        if (tabName === 'memory') {
+            loadMemoryTabData();
+        }
+    });
+});
+
+// Set first tab as active on load
+if (settingsTabs.length > 0) {
+    settingsTabs[0].classList.add('active');
+}
+if (tabContents.length > 0) {
+    tabContents[0].classList.add('active');
+}
+
+// Function to refresh just the memory tab data
+async function loadMemoryTabData() {
+    try {
+        const [topicsRes, interestsRes, conversationsRes, memoriesRes] = await Promise.all([
+            fetch('http://127.0.0.1:8000/api/topics').catch(() => null),
+            fetch('http://127.0.0.1:8000/api/interests').catch(() => null),
+            fetch('http://127.0.0.1:8000/api/conversations').catch(() => null),
+            fetch('http://127.0.0.1:8000/api/memories')
+        ]);
+        
+        const topicsData = topicsRes ? await topicsRes.json() : { topics: [] };
+        const interestsData = interestsRes ? await interestsRes.json() : { interests: [] };
+        const conversationsData = conversationsRes ? await conversationsRes.json() : { conversations: [] };
+        const memories = await memoriesRes.json();
+        
+        renderTrackedTopics(topicsData.topics || []);
+        renderDetectedInterests(interestsData.interests || []);
+        renderRecentConversations(conversationsData.conversations || []);
+        renderMemories(memories);
+        
+        if (memoriesCountEl) memoriesCountEl.innerText = memories.length || 0;
+    } catch (e) {
+        console.error('Failed to refresh memory tab data:', e);
+    }
+}
+
+// ===== SYSTEM PROMPT =====
+const systemPromptInput = document.getElementById('systemPromptInput');
+const customInstructionsInput = document.getElementById('customInstructionsInput');
+const saveSystemPromptBtn = document.getElementById('saveSystemPromptBtn');
+const resetSystemPromptBtn = document.getElementById('resetSystemPromptBtn');
+
+const DEFAULT_SYSTEM_PROMPT = `You are Owlynn, a helpful AI assistant built on LangGraph. You have access to tools for:
+- Executing code in a sandboxed environment
+- Reading and writing files in the workspace
+- Searching the web
+- Managing long-term memory
+- Browser automation (Lightpanda)
+- Processing various file formats (JSON, YAML, PDF, etc.)
+
+Be clear, concise, and helpful. When using tools, explain what you're doing. Break down complex problems into steps.`;
+
+resetSystemPromptBtn?.addEventListener('click', () => {
+    if (confirm('Reset to default system prompt?')) {
+        systemPromptInput.value = DEFAULT_SYSTEM_PROMPT;
+    }
+});
+
+saveSystemPromptBtn?.addEventListener('click', async () => {
+    const data = {
+        system_prompt: systemPromptInput.value,
+        custom_instructions: customInstructionsInput.value,
+        name: personaNameInput.value,
+        tone: personaToneInput.value
+    };
+    try {
+        const res = await fetch('http://127.0.0.1:8000/api/system-settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+        alert('System settings saved!');
+    } catch (e) {
+        console.error('Failed to save system settings:', e);
+        alert('Failed to save settings');
+    }
+});
+
+// ===== MEMORY TOGGLES =====
+const shortTermMemoryToggle = document.getElementById('shortTermMemoryToggle');
+const longTermMemoryToggle = document.getElementById('longTermMemoryToggle');
+
+shortTermMemoryToggle?.addEventListener('change', async (e) => {
+    try {
+        await fetch('http://127.0.0.1:8000/api/memory-settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ short_term_enabled: e.target.checked })
+        });
+    } catch (err) {
+        console.error('Failed to update short-term memory setting:', err);
+    }
+});
+
+longTermMemoryToggle?.addEventListener('change', async (e) => {
+    try {
+        await fetch('http://127.0.0.1:8000/api/memory-settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ long_term_enabled: e.target.checked })
+        });
+    } catch (err) {
+        console.error('Failed to update long-term memory setting:', err);
+    }
+});
+
+// ===== ADVANCED SETTINGS =====
+const temperatureSlider = document.getElementById('temperatureSlider');
+const temperatureValue = document.getElementById('temperatureValue');
+const topPSlider = document.getElementById('topPSlider');
+const topPValue = document.getElementById('topPValue');
+const maxTokensSlider = document.getElementById('maxTokensSlider');
+const maxTokensValue = document.getElementById('maxTokensValue');
+const topKSlider = document.getElementById('topKSlider');
+const topKValue = document.getElementById('topKValue');
+const streamingToggle = document.getElementById('streamingToggle');
+const thinkingToggle = document.getElementById('thinkingToggle');
+const toolVisibilityToggle = document.getElementById('toolVisibilityToggle');
+const saveAdvancedBtn = document.getElementById('saveAdvancedBtn');
+
+// Update slider display values
+temperatureSlider?.addEventListener('input', (e) => {
+    temperatureValue.textContent = parseFloat(e.target.value).toFixed(1);
+});
+
+topPSlider?.addEventListener('input', (e) => {
+    topPValue.textContent = parseFloat(e.target.value).toFixed(2);
+});
+
+maxTokensSlider?.addEventListener('input', (e) => {
+    maxTokensValue.textContent = parseInt(e.target.value);
+});
+
+topKSlider?.addEventListener('input', (e) => {
+    topKValue.textContent = parseInt(e.target.value);
+});
+
+saveAdvancedBtn?.addEventListener('click', async () => {
+    const data = {
+        temperature: parseFloat(temperatureSlider.value),
+        top_p: parseFloat(topPSlider.value),
+        max_tokens: parseInt(maxTokensSlider.value),
+        top_k: parseInt(topKSlider.value),
+        streaming_enabled: streamingToggle.checked,
+        show_thinking: thinkingToggle.checked,
+        show_tool_execution: toolVisibilityToggle.checked
+    };
+    try {
+        await fetch('http://127.0.0.1:8000/api/advanced-settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+        alert('Advanced settings saved!');
+    } catch (e) {
+        console.error('Failed to save advanced settings:', e);
+        alert('Failed to save settings');
+    }
+});
+
 saveProfileBtn?.addEventListener('click', async () => {
     const data = {
         name: profileNameInput.value,
@@ -711,13 +1076,21 @@ function connectWebSocket() {
             updateAgentStatus(data.content);
         } else if (data.type === 'file_status') {
             loadWorkspaceFiles(); // Live refresh Workspace panel lists on updates
+        } else if (data.type === 'tool_execution') {
+            // Handle tool execution display
+            handleToolExecution(data);
+        } else if (data.type === 'model_info') {
+            // Track which model was used
+            currentModelUsed = data.model || 'unknown';
         } else if (data.type === 'message') {
             renderMessage(data.message);
         } else if (data.type === 'chunk') {
-            handleChunk(data.content);
+            handleChunk(data.content, data.metadata);
         } else if (data.type === 'error') {
-            renderError(data.content);
+            renderErrorUI(data.content, data.title, data.details);
             updateAgentStatus('idle');
+        } else if (data.type === 'debug') {
+            console.log('[Server Debug]', data.content);
         }
     };
     
@@ -730,6 +1103,61 @@ function connectWebSocket() {
     socket.onerror = (error) => {
         console.error('WebSocket Error:', error);
     };
+}
+
+// Handle tool execution events
+function handleToolExecution(data) {
+    const { tool_name, status, input, output, error, duration } = data;
+    
+    let wrapper = messagesArea.lastElementChild;
+    if (!wrapper || wrapper.dataset.sender !== 'agent') {
+        wrapper = document.createElement('div');
+        wrapper.className = 'flex gap-4 group-msg mb-6';
+        wrapper.dataset.sender = 'agent';
+        
+        const avatar = document.createElement('div');
+        avatar.className = 'w-8 h-8 rounded shrink-0 bg-anthropic flex items-center justify-center text-white mt-1';
+        avatar.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8V4H8"/><rect x="4" y="8" width="16" height="12" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>';
+        wrapper.appendChild(avatar);
+        
+        const contentDiv = document.createElement('div');
+        contentDiv.className = 'flex-1 message-content text-base text-textdark';
+        wrapper.appendChild(contentDiv);
+        messagesArea.appendChild(wrapper);
+    }
+    
+    const contentDiv = wrapper.querySelector('.message-content');
+    const toolCard = renderToolExecution(tool_name, status, input, output, error);
+    
+    if (duration) {
+        const durationEl = document.createElement('div');
+        durationEl.className = 'text-xs text-gray-400 mt-2';
+        durationEl.textContent = `⏱ ${duration.toFixed(2)}s`;
+        toolCard.appendChild(durationEl);
+    }
+    
+    contentDiv.appendChild(toolCard);
+    scrollToBottom();
+}
+
+// Render error with better styling
+function renderErrorUI(message, title = 'Error', details = null) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'flex gap-4 group-msg mb-6';
+    wrapper.dataset.sender = 'error';
+    
+    const avatar = document.createElement('div');
+    avatar.className = 'w-8 h-8 rounded shrink-0 bg-red-500 flex items-center justify-center text-white mt-1';
+    avatar.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>';
+    wrapper.appendChild(avatar);
+    
+    const contentDiv = document.createElement('div');
+    contentDiv.className = 'flex-1';
+    contentDiv.appendChild(renderErrorMessage(title, message, details));
+    wrapper.appendChild(contentDiv);
+    
+    messagesArea.appendChild(wrapper);
+    scrollToBottom();
 }
 
 // UI Updaters
@@ -858,7 +1286,7 @@ function renderPreviews() {
     });
 }
 
-function handleChunk(chunkText) {
+function handleChunk(chunkText, metadata = {}) {
     if (!activeAiMessage) {
         const lastWrapper = messagesArea.lastElementChild;
         let wrapper, contentDiv;
@@ -1051,7 +1479,18 @@ function addMessageActions(contentDiv, textContent, wrapper) {
     if (contentDiv.querySelector('.message-actions')) return; 
 
     const actionsDiv = document.createElement('div');
-    actionsDiv.className = 'message-actions flex gap-2 mt-3 pt-2 border-t border-gray-100';
+    actionsDiv.className = 'flex flex-col gap-2 mt-3 pt-2 border-t border-gray-100';
+    
+    // Model info badge
+    if (currentModelUsed !== 'unknown') {
+        const infoBadge = document.createElement('div');
+        infoBadge.className = 'model-info-badge';
+        infoBadge.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M2 12h20"/></svg> <span>Model: ${DOMPurify.sanitize(currentModelUsed)}</span>`;
+        actionsDiv.appendChild(infoBadge);
+    }
+    
+    const buttonsDiv = document.createElement('div');
+    buttonsDiv.className = 'flex gap-2 message-actions';
     
     const copyBtn = document.createElement('button');
     copyBtn.className = 'text-xs flex items-center gap-1 text-gray-400 hover:text-black transition-colors';
@@ -1077,8 +1516,9 @@ function addMessageActions(contentDiv, textContent, wrapper) {
          }
     });
 
-    actionsDiv.appendChild(copyBtn);
-    actionsDiv.appendChild(regenBtn);
+    buttonsDiv.appendChild(copyBtn);
+    buttonsDiv.appendChild(regenBtn);
+    actionsDiv.appendChild(buttonsDiv);
     contentDiv.appendChild(actionsDiv);
 }
 function handleSend(e) {
@@ -1419,16 +1859,7 @@ function createToolCallUI(tc) {
 }
 
 function renderError(err) {
-    const wrapper = document.createElement('div');
-    wrapper.className = 'flex justify-center my-4';
-    
-    const errDiv = document.createElement('div');
-    errDiv.className = 'bg-red-50 text-red-600 px-4 py-2 rounded-lg text-sm border border-red-200 shadow-sm flex items-center gap-2';
-    errDiv.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg> ${err}`;
-    
-    wrapper.appendChild(errDiv);
-    messagesArea.appendChild(wrapper);
-    scrollToBottom();
+    renderErrorUI(err || 'An unexpected error occurred', 'Error');
 }
 
 // Helpers
