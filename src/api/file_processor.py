@@ -221,8 +221,9 @@ class FileWatcherHandler(FileSystemEventHandler):
     def _process_toml(self, filepath, output_path):
         """Parse and format TOML."""
         try:
-            import tomllib if hasattr(__builtins__, 'tomllib') else None
-            if tomllib is None:
+            try:
+                import tomllib
+            except ImportError:
                 try:
                     import tomli as tomllib
                 except ImportError:

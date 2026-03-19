@@ -1,6 +1,6 @@
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from src.agent.state import AgentState
-from src.agent.llm import small_llm
+from src.agent.llm import get_small_llm
 
 SIMPLE_PROMPT = """You are a concise, helpful assistant. Answer the user's question directly and briefly. Do not use tools. Do not over-explain.
 Memory context (use only if relevant):
@@ -8,6 +8,7 @@ Memory context (use only if relevant):
 
 async def simple_node(state: AgentState) -> AgentState:
     memory_context = state.get("memory_context", "None")
+    small_llm = await get_small_llm()
     response = await small_llm.ainvoke([
         SystemMessage(content=SIMPLE_PROMPT.format(
             memory_context=memory_context

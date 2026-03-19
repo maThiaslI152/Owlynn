@@ -1,6 +1,6 @@
 from langchain_core.messages import SystemMessage, AIMessage
 from src.agent.state import AgentState
-from src.agent.llm import large_llm_with_tools
+from src.agent.llm import get_large_llm_with_tools
 from langgraph.prebuilt import ToolNode
 from src.tools import web_search, execute_python_code, read_workspace_file, recall_memories
 
@@ -17,6 +17,7 @@ Memory context:
 {memory_context}"""
 
 async def tool_executor_node(state: AgentState) -> AgentState:
+    large_llm_with_tools = await get_large_llm_with_tools()
     tool_name = state.get("selected_tool", "web_search")
     memory_context = state.get("memory_context", "None")
     

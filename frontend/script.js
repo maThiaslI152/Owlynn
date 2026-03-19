@@ -131,7 +131,7 @@ const addMemoryBtn = document.getElementById('addMemoryBtn');
 const memoriesListEl = document.getElementById('memoriesList');
 
 // Initialize
-sessionIdEl.value = currentSessionId;
+    if (sessionIdEl) sessionIdEl.value = currentSessionId;
 connectWebSocket();
 loadSettingsData();
 loadProjects();
@@ -448,7 +448,7 @@ async function switchProject(projectId, resetChat = true) {
             const savedSessionId = localStorage.getItem(`project_session_${projectId}`);
             if (savedSessionId) {
                 currentSessionId = savedSessionId;
-                sessionIdEl.value = currentSessionId;
+                if (sessionIdEl) sessionIdEl.value = currentSessionId;
                 await loadChatHistory(currentSessionId);
                 
                 // Reconnect WebSocket to the correct thread
@@ -553,7 +553,7 @@ function renderProjectChats(chats) {
 
 async function switchChat(sessionId) {
     currentSessionId = sessionId;
-    sessionIdEl.value = currentSessionId;
+    if (sessionIdEl) sessionIdEl.value = currentSessionId;
     
     // Update mapping in localStorage
     if (activeProjectId) {
@@ -936,7 +936,7 @@ newChatBtn.addEventListener('click', async () => {
     updateAgentStatus('idle');
     
     currentSessionId = generateUUID();
-    sessionIdEl.value = currentSessionId;
+    if (sessionIdEl) sessionIdEl.value = currentSessionId;
     messagesArea.innerHTML = '';
     pendingFiles = [];
     renderPreviews();
@@ -987,6 +987,7 @@ modeReasoningBtn?.addEventListener('click', () => {
 });
 
 function updateModeUI() {
+    if (!modeFastBtn || !modeReasoningBtn) return;
     if (activeMode === 'tools_off') {
         modeFastBtn.className = 'px-3 py-1 font-medium bg-anthropic text-white transition-colors';
         modeReasoningBtn.className = 'px-3 py-1 font-medium text-gray-500 hover:bg-gray-50 transition-colors';
@@ -1094,14 +1095,19 @@ function connectWebSocket() {
         }
     };
     
-    socket.onclose = () => {
+    socket.onclose = (event) => {
+        console.log(`[WS Check] Closed. Code: ${event.code}, Reason: ${event.reason || 'None'}`);
         updateConnectionStatus('disconnected');
         // Auto reconnect after 3 seconds
         setTimeout(connectWebSocket, 3000);
     };
     
     socket.onerror = (error) => {
-        console.error('WebSocket Error:', error);
+        try {
+            console.error('[WS Check] Error Details:', JSON.stringify(error, Object.getOwnPropertyNames(error)));
+        } catch (e) {
+            console.error('[WS Check] Error:', error);
+        }
     };
 }
 
@@ -1175,17 +1181,17 @@ function quickAction(text) {
 function updateConnectionStatus(status) {
     if (status === 'connected') {
         statusDot.className = 'w-2 h-2 rounded-full bg-green-500';
-        mobileDot.className = 'w-2 h-2 rounded-full bg-green-500';
+        if (mobileDot) mobileDot.className = 'w-2 h-2 rounded-full bg-green-500';
         statusText.textContent = 'Connected to MLX API';
         sendBtn.disabled = false;
     } else if (status === 'connecting') {
         statusDot.className = 'w-2 h-2 rounded-full bg-yellow-500 hover:animate-pulse';
-        mobileDot.className = 'w-2 h-2 rounded-full bg-yellow-500 hover:animate-pulse';
+        if (mobileDot) mobileDot.className = 'w-2 h-2 rounded-full bg-yellow-500 hover:animate-pulse';
         statusText.textContent = 'Connecting...';
         sendBtn.disabled = true;
     } else {
         statusDot.className = 'w-2 h-2 rounded-full bg-red-500';
-        mobileDot.className = 'w-2 h-2 rounded-full bg-red-500';
+        if (mobileDot) mobileDot.className = 'w-2 h-2 rounded-full bg-red-500';
         statusText.textContent = 'Disconnected';
         sendBtn.disabled = true;
     }

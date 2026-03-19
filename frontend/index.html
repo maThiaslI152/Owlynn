@@ -995,13 +995,7 @@
             async: true
         });
         
-        const originalRenderer = {
-            code: marked.defaults.renderer.code,
-            codespan: marked.defaults.renderer.codespan,
-            table: marked.defaults.renderer.table,
-            listitem: marked.defaults.renderer.listitem
-        };
-        
+
         marked.use({
             renderer: {
                 code({ text, lang, escaped }) {
@@ -1028,5 +1022,6 @@
         });
     </script>
     <script src="script.js"></script>
+
 </body>
 </html>

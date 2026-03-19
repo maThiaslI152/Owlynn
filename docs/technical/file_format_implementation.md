@@ -393,6 +393,6 @@ To add a new format, edit `src/api/file_processor.py`:
 
 ---
 
-For detailed format information, see [FILE_FORMATS_GUIDE.md](FILE_FORMATS_GUIDE.md).
+For detailed format information, see [FILE_FORMATS_GUIDE.md](../guides/file_formats.md).
 
 For code implementation details, see [src/api/file_processor.py](src/api/file_processor.py).

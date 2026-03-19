@@ -132,5 +132,9 @@ async def initialize_llm_pool():
 from src.tools import web_search, execute_python_code, read_workspace_file, recall_memories
 
 TOOLS = [web_search, execute_python_code, read_workspace_file, recall_memories]
-large_llm_with_tools = large_llm.bind_tools(TOOLS)
+async def get_large_llm_with_tools():
+    """Returns the large LLM with tools bound."""
+    llm = await LLMPool.get_large_llm()
+    return llm.bind_tools(TOOLS)
+
 

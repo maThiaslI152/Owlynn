@@ -1,6 +1,6 @@
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from src.agent.state import AgentState
-from src.agent.llm import large_llm
+from src.agent.llm import get_large_llm
 
 COMPLEX_PROMPT = """You are an expert reasoning agent. Think step by step before answering.
 You have access to the user's memory context below — use it to personalize and ground your response.
@@ -20,6 +20,7 @@ Guidelines:
 async def complex_node(state: AgentState) -> AgentState:
     memory_context = state.get("memory_context", "None")
     persona        = state.get("persona", "No persona available")
+    large_llm = await get_large_llm()
     response = await large_llm.ainvoke([
         SystemMessage(content=COMPLEX_PROMPT.format(
             memory_context=memory_context,

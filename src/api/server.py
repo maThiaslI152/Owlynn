@@ -209,6 +209,21 @@ async def api_get_advanced_settings():
     except Exception as e:
         return {"error": str(e)}
 
+@app.get("/api/health")
+async def api_health():
+    """Check if the agent graph is fully initialized."""
+    agent_ready = False
+    try:
+        agent_ready = hasattr(app, "state") and getattr(app.state, "agent", None) is not None
+    except Exception:
+        pass
+        
+    return {
+        "status": "ok",
+        "agent": "ready" if agent_ready else "initializing"
+    }
+
+
 @app.post("/api/advanced-settings")
 async def api_update_advanced_settings(body: dict):
     """Update inference and behavior settings."""

@@ -2,7 +2,31 @@
 
 A private, local-first autonomous agent based on Anthropic’s Cowork platform. This project uses LangGraph for orchestration, a local LLM (e.g., GLM-4 via MLX or Qwen via LM Studio) for multimodal and text reasoning, and a dual-memory system for robust context tracking.
 
+## 📚 Documentation Index
+
+For detailed guides and architecture, refer to the `docs/` folder:
+
+*   **[Architecture Overview](docs/ARCHITECTURE_OVERVIEW.md)**: High-level system design and LangGraph flow describing current logic.
+*   **Guides**:
+    *   **[Quickstart](docs/guides/quickstart.md)**: Setup and run the application.
+    *   **[Backend Integration](docs/guides/backend_integration.md)**: Details on tool execution events and WebSocket updates.
+    *   **[Frontend Update](docs/guides/frontend_update.md)**: Details on the Cowork-style interface and setting options.
+    *   **[File Formats](docs/guides/file_formats.md)**: Supported document types and processing.
+    *   **[Browser Automation](docs/guides/lightpanda.md)**: setup and use Lightpanda for dynamic crawling.
+    *   **[M4 Deployment](docs/guides/m4_deployment.md)**: Optimization strategies for Apple Silicon Macs.
+    *   **[Personal Assistant Memory](docs/guides/personal_assistant_memory.md)**: Overview of topic/intensity tracking.
+*   **Technical Notes**:
+    *   [File Format Implementation](docs/technical/file_format_implementation.md)
+    *   [LangGraph Optimization](docs/technical/langgraph_optimization.md)
+    *   [Quick Reference](docs/technical/quick_reference.md)
+*   **Archive**:
+    *   [Implementation Checklist](docs/archive/implementation_checklist.md)
+    *   [Verification Checklist](docs/archive/verification_checklist.md)
+
+---
+
 ## Core Architecture
+
 
 - **Orchestrator:** LangGraph (Stateful, cyclic graph-based logic)
 - **Brain:** Local LLM running via LLM Server (e.g., MLX or LM Studio)
@@ -20,47 +44,33 @@ A private, local-first autonomous agent based on Anthropic’s Cowork platform. 
 
 ## Usage
 
-### 1. Start Support Services
-The agent requires Redis and ChromaDB.
-```bash
-podman compose up -d
-```
-
-### 2. Start LLM Server (Model Backend)
+### 1. Start LLM Server (Model Backend)
 Before running the agent, start your local LLM server.
 
-#### Option A: MLX VLM Server (for Apple Silicon)
-```bash
-./runmlx.sh
-```
-*Starts on `127.0.0.1:8080`.*
-
-#### Option B: LM Studio (Alternative)
-1. Load your model in LM Studio (e.g., `qwen/qwen3.5-9b`).
+#### LM Studio Setup
+1. Load your model in LM Studio (e.g., `qwen/qwen3.5-9b` and `nemotron`).
 2. Enable the **Local Inference Server** in LM Studio (usually port `1234`).
-3. Verify or update `data/user_profile.json` with your model name and port:
+3. Verify or update `data/user_profile.json` with both model names:
    ```json
-   "llm_base_url": "http://127.0.0.1:1234/v1",
-   "llm_model_name": "qwen/qwen3.5-9b"
+   "small_llm_base_url": "http://127.0.0.1:1234/v1",
+   "small_llm_model_name": "nvidia/nemotron-3-nano-4b",
+   "large_llm_base_url": "http://127.0.0.1:1234/v1",
+   "large_llm_model_name": "qwen/qwen3.5-9b"
    ```
 
-### 3. Start Agent Backend & Frontend
+### 2. Start Application
+To start the entire support stack (Redis, ChromaDB), Backend, and Frontend (Tauri Desktop Window), run:
 
-#### Option A: Browser Web App
-Run the FastAPI application:
 ```bash
-./run.sh
+chmod +x start.sh  # (First time only)
+./start.sh
 ```
-*This starts the backend on `127.0.0.1:8000` and serves the frontend in your browser at [http://127.0.0.1:8000](http://127.0.0.1:8000).*
 
-#### Option B: Tauri Desktop App
-Run the integrated runner script:
-```bash
-chmod +x run_tauri.sh
-./run_tauri.sh
-```
-*This starts the background FastAPI backend and then launches the native desktop window using Tauri.*
-
+*This script will:*
+1. Auto-start **Podman containers** for Redis and ChromaDB.
+2. Verify **LM Studio** is active with your model loaded.
+3. Launch the **FastAPI backend** asynchronously.
+4. Open the native **Tauri desktop window**.
 
 ### 4. Access the UI
 Open your browser and navigate to:
@@ -98,118 +108,27 @@ Open your browser and navigate to:
 - **recall_memories**: Search stored facts
 - **update_persona**: Customize agent behavior
 
-## Customization & Advanced Settings
+## ⚙️ Customization & Settings
 
-### Settings Dashboard (NEW - Cowork-like Interface)
+Owlynn features a comprehensive settings dashboard with tabs for Profile, System Prompts, Memory Toggle, and Advanced Inference parameters.
 
-Click the **profile card** in the sidebar to open the advanced Settings modal with four tabs:
+For detailed information on configuring the agent, see:
+*   **[Frontend Update & Settings Guide](docs/guides/frontend_update.md)**: Explains the tabbed interface, memory toggles, and inference tuning.
 
-**📋 Profile Tab**
-- Display name, language preference, response style
-- LLM model URL and model name configuration
-- Direct backend model selection
+---
 
-**⚙️ System Tab** (NEW)
-- **Agent Persona**: Customize name and communication tone
-- **System Prompt Editor**: Full control over agent behavior
-- **Custom Instructions**: Add domain-specific rules and guidelines
-- **Reset to Default**: Quick access to default configuration
+## 📄 Supported File Formats
 
-**🧠 Memory Tab** (NEW)
-- **Enable/Disable Short-term Memory**: Toggle conversation context retention
-- **Enable/Disable Long-term Memory**: Toggle cross-session memory
-- **Memory Manager**: Add facts agent remembers about you and your preferences
-- **Memory Viewer**: See all stored memories with delete options
+The agent automatically processes uploaded files (PDF, Word, MarkDown, JSON, etc.) and caches them for instant retrieval.
 
-**🚀 Advanced Tab** (NEW)
-- **Inference Parameters**:
-  - Temperature (0.0-2.0): Control creativity vs focus
-  - Top-p (0.0-1.0): Nucleus sampling for diversity
-  - Max Tokens (256-8192): Response length limit
-  - Top-k (0-100): Token selection diversity
-- **Behavior Options**:
-  - Streaming Responses: See output as it generates
-  - Show Thinking: Display internal reasoning (if available)
-  - Show Tool Execution: Visualize tool usage
+For a full list of supported formats and processing details, see:
+*   **[File Formats Guide](docs/guides/file_formats.md)**
 
-### System Prompt Customization
+---
 
-Define how the agent behaves by editing the system prompt. Example:
+## ✨ Enhanced Chat Experience
 
-```
-You are Owlynn, a helpful AI assistant specialized in backend systems.
-You excel at code review, architecture design, and system optimization.
-Always explain your reasoning step-by-step. 
-Prefer Python and Go for demonstrations.
-Be direct and concise - the user values efficiency.
-```
+The interface supports syntax highlighting, tool execution status cards, rich formatting, and error displays.
 
-### Memory Management
-
-Store facts for the agent to remember:
-- "I'm a Rust developer"
-- "I prefer minimal, readable code"
-- "I work in distributed systems"
-- "I like detailed performance analysis"
-
-Agent will reference these in future conversations for personalized responses.
-
-### Inference Tuning
-
-Fine-tune model behavior for different tasks:
-
-**For Coding**: Low temperature (0.2), high max_tokens (4096)  
-**For Brainstorming**: High temperature (1.2), nucleus sampling 0.95  
-**For Analysis**: Medium temperature (0.7), streaming enabled  
-**For Summaries**: Low temperature (0.3), low max_tokens (1024)  
-
-See [COWORK_FRONTEND_UPDATE.md](COWORK_FRONTEND_UPDATE.md) for detailed guide.
-
-### Supported File Formats
-
-The agent can automatically understand and process a wide variety of file formats. Files are automatically converted to readable text formats when uploaded:
-
-**Document Formats:**
-- PDF (`.pdf`) - Extracts text with page markers
-- Microsoft Word (`.docx`) - Extracts paragraph text
-- Markdown (`.md`, `.markdown`) - Passed through with validation
-
-**Data & Serialization:**
-- JSON (`.json`) - Pretty-printed with syntax highlighting
-- XML (`.xml`) - Formatted with tree structure visualization
-- YAML (`.yaml`, `.yml`) - Structured configuration display
-- TOML (`.toml`) - Configuration format with schema preservation
-- CSV/XLSX (`.csv`, `.xlsx`) - Converted to Markdown tables
-- INI/CONF (`.ini`, `.conf`, `.config`) - Section-based parsing
-
-**Web & Markup:**
-- HTML (`.html`, `.htm`) - Extracts readable content and structure
-- Databases (`.db`, `.sqlite`, `.sqlite3`) - Lists tables, columns, and sample data
-
-**Archives:**
-- ZIP (`.zip`) - Lists contents
-- TAR/GZ (`.tar`, `.gz`) - Lists contents
-- RAR/7Z (`.rar`, `.7z`) - Requires additional utilities
-
-**Text & Code:**
-- Source Code (`.py`, `.js`, `.ts`, `.java`, `.cpp`, `.c`, `.go`, `.rs`, `.rb`, `.php`) - Analyzed with metadata (line count, functions, classes)
-- Log Files (`.log`) - Tails last 500 lines with formatting
-- Plain Text (`.txt`) - Direct readability
-
-**Auto-Processing:**
-Files are automatically processed when uploaded and cached in `.processed/` directory for instant retrieval during conversations.
-
-See [LIGHTPANDA_GUIDE.md](LIGHTPANDA_GUIDE.md) for detailed browser automation documentation.
-
-## Enhanced Chat Experience
-
-The chat interface now features:
-- **Syntax Highlighting**: Beautiful highlighted code blocks for 190+ languages
-- **Tool Execution Visibility**: Watch tools run with real-time status cards
-- **Rich Formatting**: Tables, lists, and math equations render properly
-- **Model Information**: See which model was used for each response
-- **Error Cards**: Clear, formatted error messages with details
-- **Copy & Regenerate**: Easy message management
-
-See [IMPROVEMENTS.md](IMPROVEMENTS.md) for upgrade details.
-
+For details on the upgrades, see the **[Frontend Update Guide](docs/guides/frontend_update.md)**.
+For browser automation details, see **[Browser Automation (Lightpanda)](docs/guides/lightpanda.md)**.

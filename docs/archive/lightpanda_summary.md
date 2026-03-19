@@ -314,7 +314,7 @@ To verify the integration works:
 
 ## Support Resources
 
-1. **Main Guide**: [LIGHTPANDA_GUIDE.md](LIGHTPANDA_GUIDE.md)
+1. **Main Guide**: [LIGHTPANDA_GUIDE.md](../guides/lightpanda.md)
 2. **API Docs**: Tool docstrings in code
 3. **Examples**: In guides (20+ examples)
 4. **Troubleshooting**: Dedicated section in guide

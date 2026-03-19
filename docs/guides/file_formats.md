@@ -650,4 +650,4 @@ def _process_custom_format(self, filepath, output_path):
 
 ---
 
-For questions or issues with file format support, check the main [README.md](README.md) or explore the `src/api/file_processor.py` implementation.
+For questions or issues with file format support, check the main [README.md](../../README.md) or explore the `src/api/file_processor.py` implementation.
