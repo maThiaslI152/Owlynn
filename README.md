@@ -72,4 +72,7 @@ Open your browser and navigate to:
 - `src/memory/`: Memory management (long-term, user profiles, etc.).
 - `src/tools/`: Custom tools available to the agent (sandbox, web, translation).
 - `frontend/`: Single-page app for chatting with the agent.
+- `assets/`: Media and icons for the application (e.g., app logos).
 - `tests/`: Automated unit and integration tests.
+  - `standalone/`: Subdirectory for standalone verification and utility scripts.
+

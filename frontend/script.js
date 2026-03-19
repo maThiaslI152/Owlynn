@@ -31,8 +31,8 @@ const projectsListEl = document.getElementById('projectsList');
 const addProjectBtn = document.getElementById('addProjectBtn');
 const projectKnowledgeSection = document.getElementById('projectKnowledgeSection');
 const projectFilesList = document.getElementById('projectFilesList');
-const projectChatsSection = document.getElementById('projectChatsSection');
-const projectChatsList = document.getElementById('projectChatsList');
+const projectChatsSection = document.getElementById('sidebarRecentsList'); // Wrapper/Section
+const projectChatsList = document.getElementById('sidebarRecentsList');    // List container
 
 // Settings Modal DOM Elements
 const settingsModal = document.getElementById('settingsModal');
@@ -1965,3 +1965,212 @@ function showCustomInput(title, label, defaultValue) {
         input.onkeyup = (e) => { if (e.key === 'Enter') close(input.value.trim()); };
     });
 }
+
+// ─── Claude-like View Management ──────────────────────────────────────────
+let currentView = 'welcome';
+
+function switchView(viewName) {
+    currentView = viewName;
+    
+    // Hide all views
+    document.querySelectorAll('.view-pane').forEach(p => p.classList.add('hidden'));
+    
+    // Show target view
+    const target = document.getElementById(`view-${viewName}`);
+    if (target) {
+        target.classList.remove('hidden');
+        if (viewName === 'customize') target.classList.add('flex');
+    }
+    
+    // Update nav active state
+    document.querySelectorAll('.nav-item').forEach(item => {
+        const itemView = item.getAttribute('data-view');
+        if (itemView === viewName) {
+            item.classList.add('bg-gray-100', 'font-medium');
+        } else {
+            item.classList.remove('bg-gray-100', 'font-medium');
+        }
+    });
+
+    // Load data conditionally
+    if (viewName === 'projects') loadProjectsGrid();
+    if (viewName === 'artifacts') loadArtifactsGrid();
+    if (viewName === 'customize') loadSkillsList();
+    if (viewName === 'chats') loadChatsList();
+}
+
+function initNavigation() {
+    document.querySelectorAll('.nav-item').forEach(item => {
+        item.addEventListener('click', () => {
+            const view = item.getAttribute('data-view');
+            if (view) switchView(view);
+        });
+    });
+
+    // Welcome Input Handler
+    const welcomeInput = document.getElementById('welcomeInput');
+    const welcomeSendBtn = document.getElementById('welcomeSendBtn');
+    
+    if (welcomeInput && welcomeSendBtn) {
+        welcomeSendBtn.addEventListener('click', () => {
+            const text = welcomeInput.value.trim();
+            if (!text) return;
+            
+            // Switch to Chat View
+            switchView('chat');
+            
+            // Transfer text to main chat design
+            messageInput.value = text;
+            welcomeInput.value = ''; // clear
+            
+            // Trigger Submit
+            chatForm.dispatchEvent(new Event('submit'));
+        });
+
+        welcomeInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                welcomeSendBtn.click();
+            }
+        });
+    }
+
+    // New Chat Button override to show Welcome screen
+    const originalNewChatBtn = document.getElementById('newChatBtn');
+    if (originalNewChatBtn) {
+        originalNewChatBtn.addEventListener('click', () => {
+            switchView('welcome');
+        });
+    }
+}
+
+async function loadProjectsGrid() {
+    const container = document.getElementById('projectsGridContainer');
+    if (!container) return;
+    container.innerHTML = '<p class="text-xs text-gray-400">Loading projects...</p>';
+    
+    try {
+        const res = await fetch('http://127.0.0.1:8000/api/projects');
+        const projects = await res.json();
+        container.innerHTML = '';
+        projects.forEach(p => {
+            const card = document.createElement('div');
+            card.className = 'p-4 bg-cloud border border-bordercolor rounded-xl hover:shadow-md transition-shadow cursor-pointer flex flex-col gap-1';
+            card.onclick = () => {
+                switchProject(p.id);
+                switchView('chat');
+            };
+            card.innerHTML = `
+                <h3 class="font-semibold text-sm text-textdark">${p.name}</h3>
+                <p class="text-xs text-gray-500">${p.instructions || 'No description'}</p>
+                <div class="mt-2 flex items-center justify-between text-[10px] text-gray-400 border-t pt-2 border-bordercolor">
+                    <span>${p.chats ? p.chats.length : 0} chats</span>
+                </div>
+            `;
+            container.appendChild(card);
+        });
+    } catch (e) {
+        container.innerHTML = '<p class="text-xs text-red-500">Failed to load projects</p>';
+    }
+}
+
+async function loadArtifactsGrid() {
+    const container = document.getElementById('artifactsGridContainer');
+    if (!container) return;
+    container.innerHTML = '<p class="text-xs text-gray-400">Loading artifacts...</p>';
+    
+    try {
+        const res = await fetch('http://127.0.0.1:8000/api/artifacts');
+        const artifacts = await res.json();
+        container.innerHTML = '';
+        artifacts.forEach(a => {
+            const card = document.createElement('div');
+            card.className = 'border border-bordercolor rounded-xl overflow-hidden hover:shadow-md transition-shadow cursor-pointer bg-white';
+            card.innerHTML = `
+                <img src="${a.image_url}" class="w-full h-32 object-cover bg-gray-50" alt="${a.name}">
+                <div class="p-3 space-y-1">
+                    <span class="text-[10px] bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded-full">${a.category}</span>
+                    <h4 class="font-medium text-sm text-textdark truncate">${a.name}</h4>
+                    <p class="text-xs text-gray-500 line-clamp-2">${a.description}</p>
+                </div>
+            `;
+            container.appendChild(card);
+        });
+    } catch (e) {
+        container.innerHTML = '<p class="text-xs text-red-500">Failed to load artifacts</p>';
+    }
+}
+
+async function loadSkillsList() {
+    const container = document.getElementById('skillsListContainer');
+    if (!container) return;
+    container.innerHTML = '<p class="text-xs text-gray-400">Loading skills...</p>';
+    
+    try {
+        const res = await fetch('http://127.0.0.1:8000/api/tools');
+        const tools = await res.json();
+        container.innerHTML = '';
+        tools.forEach(t => {
+            const item = document.createElement('div');
+            item.className = 'p-3 border border-bordercolor rounded-xl flex items-start justify-between hover:bg-cloud/50 transition-colors bg-white';
+            item.innerHTML = `
+                <div class="flex items-start gap-3">
+                    <div class="p-2 bg-gray-100 rounded-lg text-gray-600">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                    </div>
+                    <div>
+                        <h4 class="font-medium text-sm text-textdark font-mono">${t.name}</h4>
+                        <p class="text-xs text-gray-500 mt-0.5">${t.description}</p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-2">
+                     <span class="text-[10px] bg-green-50 text-green-700 border border-green-200 px-1.5 py-0.5 rounded">Active</span>
+                </div>
+            `;
+            container.appendChild(item);
+        });
+    } catch (e) {
+        container.innerHTML = '<p class="text-xs text-red-500">Failed to load skills</p>';
+    }
+}
+
+async function loadChatsList() {
+    const container = document.getElementById('chatsListContainer');
+    if (!container) return;
+    container.innerHTML = '<p class="text-xs text-gray-400">Loading chats...</p>';
+    
+    try {
+        const res = await fetch(`http://127.0.0.1:8000/api/projects/${activeProjectId}`);
+        const project = await res.json();
+        container.innerHTML = '';
+        
+        const chats = project.chats || [];
+        if (chats.length === 0) {
+            container.innerHTML = '<p class="text-xs text-gray-400 italic">No chats in this project</p>';
+            return;
+        }
+
+        chats.forEach(chat => {
+            const item = document.createElement('div');
+            item.className = 'p-3 bg-white border border-bordercolor rounded-xl hover:shadow-sm transition-shadow cursor-pointer flex items-center justify-between';
+            item.onclick = () => {
+                switchChat(chat.id);
+                switchView('chat');
+            };
+            item.innerHTML = `
+                <div class="flex items-center gap-3">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-gray-400"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                    <span class="text-sm font-medium text-textdark truncate">${chat.name || 'Untitled Chat'}</span>
+                </div>
+                <span class="text-[11px] text-gray-400">${new Date(chat.created_at * 1000).toLocaleDateString()}</span>
+            `;
+            container.appendChild(item);
+        });
+    } catch (e) {
+        container.innerHTML = '<p class="text-xs text-red-500">Failed to load chats</p>';
+    }
+}
+
+// Trigger initializations
+if (typeof switchView === 'function') switchView('welcome');
+if (typeof initNavigation === 'function') initNavigation();

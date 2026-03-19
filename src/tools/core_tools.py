@@ -7,6 +7,7 @@ All tools are wrapped using @tool for LangChain integration.
 """
 
 import os
+import shlex
 from langchain_core.tools import tool
 from .sandbox import PodmanSandbox
 from .thai_translation_tool import lookup_thai_terms
@@ -23,6 +24,16 @@ from .mcp_client import get_mcp_tools
 WORKSPACE_DIR = os.path.abspath(os.path.join(os.getcwd(), "workspace"))
 sandbox = PodmanSandbox(workspace_path=WORKSPACE_DIR)
 
+def get_safe_workspace_path(filename: str) -> tuple[str, str | None]:
+    """Resolves path and checks if it stays inside WORKSPACE_DIR."""
+    filename = filename.lstrip("/")
+    if filename.startswith("workspace/"):
+        filename = filename[len("workspace/"):]
+    filepath = os.path.abspath(os.path.join(WORKSPACE_DIR, filename))
+    if not filepath.startswith(os.path.abspath(WORKSPACE_DIR)):
+         return "", "Error: Access denied. Path is outside workspace."
+    return filepath, None
+
 @tool
 def execute_sandboxed_shell(command: str) -> str:
     """
@@ -37,13 +48,9 @@ def read_workspace_file(filename: str) -> str:
     """
     Reads the content of a file located in the agent's workspace.
     """
-    # Strip leading slash to prevent os.path.join from treating it as absolute root
-    filename = filename.lstrip("/")
-    # Also strip the literal '/workspace' if the agent uses its internal path
-    if filename.startswith("workspace/"):
-        filename = filename[len("workspace/"):]
-        
-    filepath = os.path.join(WORKSPACE_DIR, filename)
+    filepath, err = get_safe_workspace_path(filename)
+    if err:
+        return err
     if not os.path.exists(filepath):
         # Fuzzy match fallback for model typos or variations (e.g., stripped numbering)
         try:
@@ -98,11 +105,9 @@ def write_workspace_file(filename: str, content: str) -> str:
     Writes content to a specific file in the agent's workspace.
     Will overwrite the file if it already exists.
     """
-    filename = filename.lstrip("/")
-    if filename.startswith("workspace/"):
-        filename = filename[len("workspace/"):]
-        
-    filepath = os.path.join(WORKSPACE_DIR, filename)
+    filepath, err = get_safe_workspace_path(filename)
+    if err:
+        return err
     
     # Ensure subdirectory exists if passed (e.g., 'src/main.py')
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
@@ -119,20 +124,17 @@ def list_workspace_files(directory: str = ".", recursive: bool = False) -> str:
     """
     Lists files in the workspace. Use recursive=True for a tree view.
     """
-    directory = directory.lstrip("/")
-    if directory.startswith("workspace/") or directory == "workspace":
-        directory = directory[len("workspace"):].lstrip("/")
-        if not directory:
-             directory = "."
-             
-    target_dir = os.path.join(WORKSPACE_DIR, directory)
+    target_dir, err = get_safe_workspace_path(directory)
+    if err:
+        return err
     if not os.path.exists(target_dir):
         return f"Error: Directory '{directory}' not found."
         
     try:
         if recursive:
             # Simple recursive listing (equivalent to get_file_tree)
-            find_cmd = f"find {directory} -maxdepth 3 -not -path '*/.*' -not -path '*/__pycache__*'"
+            directory_quoted = shlex.quote(directory)
+            find_cmd = f"find {directory_quoted} -maxdepth 3 -not -path '*/.*' -not -path '*/__pycache__*'"
             result = sandbox.execute_shell(find_cmd)
             if not result or "Execution Error" in result:
                 return f"Error listing recursive files in {directory}."
@@ -187,7 +189,8 @@ def search_workspace_files(query: str, recursive: bool = True) -> str:
         recursive: Whether to search recursively through subdirectories.
     """
     # Use grep in the sandbox for efficient searching
-    grep_cmd = f"grep -rn{'r' if recursive else ''} --exclude-dir='.git' --exclude-dir='.venv' \"{query}\" ."
+    query_quoted = shlex.quote(query)
+    grep_cmd = f"grep -rn{'r' if recursive else ''} --exclude-dir='.git' --exclude-dir='.venv' {query_quoted} ."
     result = sandbox.execute_shell(grep_cmd)
     
     if not result.strip():
@@ -212,11 +215,9 @@ def edit_workspace_file(filename: str, search_pattern: str, replacement_text: st
         search_pattern: The exact block of text to find.
         replacement_text: The new text to replace it with.
     """
-    filename = filename.lstrip("/")
-    if filename.startswith("workspace/"):
-        filename = filename[len("workspace/"):]
-        
-    filepath = os.path.join(WORKSPACE_DIR, filename)
+    filepath, err = get_safe_workspace_path(filename)
+    if err:
+        return err
     if not os.path.exists(filepath):
         return f"Error: File '{filename}' not found."
         
@@ -240,11 +241,9 @@ def delete_workspace_file(filename: str) -> str:
     """
     Deletes a file from the agent's workspace.
     """
-    filename = filename.lstrip("/")
-    if filename.startswith("workspace/"):
-        filename = filename[len("workspace/"):]
-        
-    filepath = os.path.join(WORKSPACE_DIR, filename)
+    filepath, err = get_safe_workspace_path(filename)
+    if err:
+        return err
     if not os.path.exists(filepath):
         return f"Error: File '{filename}' not found."
         
@@ -259,11 +258,9 @@ def create_directory(directory: str) -> str:
     """
     Creates a new directory in the workspace.
     """
-    directory = directory.lstrip("/")
-    if directory.startswith("workspace/"):
-        directory = directory[len("workspace/"):]
-        
-    target_dir = os.path.join(WORKSPACE_DIR, directory)
+    target_dir, err = get_safe_workspace_path(directory)
+    if err:
+        return err
     try:
         os.makedirs(target_dir, exist_ok=True)
         return f"Successfully created directory: {directory}"

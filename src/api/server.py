@@ -186,6 +186,61 @@ async def api_update_project_chat(project_id: str, chat_id: str, body: dict):
     project_manager.update_chat_in_project(project_id, chat_id, **body)
     return {"status": "ok"}
 
+@app.get("/api/tools")
+async def api_get_tools():
+    """Returns a list of available tools for the Customize view."""
+    from src.tools import tool_registry
+    tools = []
+    for name, tool in tool_registry.items():
+        desc = getattr(tool, "description", "")
+        if not desc and hasattr(tool, "__doc__") and tool.__doc__:
+            desc = tool.__doc__.strip().split("\n")[0]
+        tools.append({
+            "name": name, 
+            "description": desc or "No description available.",
+            "type": "core" # or plugin
+        })
+    return tools
+
+@app.get("/api/artifacts")
+async def api_get_artifacts(project_id: str = "default"):
+    """Returns a list of artifacts. Mocked for design demonstration."""
+    # In a full impl, we would read from `{workspace}/.artifacts/`
+    return [
+        {
+            "id": "1",
+            "name": "Writing editor",
+            "type": "editor",
+            "category": "Learn something",
+            "image_url": "https://images.unsplash.com/photo-1455390582262-044cdead277a?w=400&auto=format&fit=crop&q=60",
+            "description": "Use 'I' instead of 'me' as the subject."
+        },
+        {
+            "id": "2",
+            "name": "PRD To Prototype",
+            "type": "prototype",
+            "category": "Life hacks",
+            "image_url": "https://images.unsplash.com/photo-1507238691740-187a5b1d37b8?w=400&auto=format&fit=crop&q=60",
+            "description": "Convert PRD to visual design dashboard."
+        },
+        {
+            "id": "3",
+            "name": "Slack Project Insights",
+            "type": "insights",
+            "category": "Play a game",
+            "image_url": "https://images.unsplash.com/photo-1563986768609-322da13575f3?w=400&auto=format&fit=crop&q=60",
+            "description": "Summarize insights from project slack dumps."
+        },
+        {
+            "id": "4",
+            "name": "CodeVerter",
+            "type": "converter",
+            "category": "Be creative",
+            "image_url": "https://images.unsplash.com/photo-1517694712202-14dd9538aa97?w=400&auto=format&fit=crop&q=60",
+            "description": "Convert Python to Javascript logic."
+        }
+    ]
+
 @app.get("/api/files")
 async def api_list_files(sub_path: str = "", project_id: str = "default"):
     """Returns a list of files in the workspace with processing status and folder support."""
@@ -247,7 +302,9 @@ async def api_get_file(filename: str, sub_path: str = "", project_id: str = "def
     if not target_dir.startswith(os.path.abspath(base_dir)):
          return {"status": "error", "message": "Access denied"}
          
-    filepath = os.path.join(target_dir, filename)
+    filepath = os.path.abspath(os.path.join(target_dir, filename))
+    if not filepath.startswith(os.path.abspath(base_dir)):
+         return {"status": "error", "message": "Access denied"}
     if not os.path.exists(filepath):
          return {"status": "error", "message": "File not found"}
     return FileResponse(filepath)
@@ -265,7 +322,9 @@ async def api_delete_file(filename: str, sub_path: str = "", project_id: str = "
         if not target_dir.startswith(os.path.abspath(base_dir)):
              return {"status": "error", "message": "Access denied"}
              
-        filepath = os.path.join(target_dir, filename)
+        filepath = os.path.abspath(os.path.join(target_dir, filename))
+        if not filepath.startswith(os.path.abspath(base_dir)):
+             return {"status": "error", "message": "Access denied"}
         if os.path.exists(filepath):
             if os.path.isdir(filepath):
                  import shutil
@@ -304,8 +363,10 @@ async def api_rename_file(filename: str, body: dict):
         if not target_dir.startswith(os.path.abspath(base_dir)):
              return {"status": "error", "message": "Access denied"}
              
-        old_path = os.path.join(target_dir, filename)
-        new_path = os.path.join(target_dir, new_name)
+        old_path = os.path.abspath(os.path.join(target_dir, filename))
+        new_path = os.path.abspath(os.path.join(target_dir, new_name))
+        if not old_path.startswith(os.path.abspath(base_dir)) or not new_path.startswith(os.path.abspath(base_dir)):
+             return {"status": "error", "message": "Access denied"}
         
         if not os.path.exists(old_path):
              return {"status": "error", "message": "File not found"}
@@ -346,8 +407,10 @@ async def api_move_file(filename: str, body: dict):
         if not src_dir.startswith(os.path.abspath(base_dir)) or not dst_dir.startswith(os.path.abspath(base_dir)):
              return {"status": "error", "message": "Access denied"}
              
-        old_path = os.path.join(src_dir, filename)
-        new_path = os.path.join(dst_dir, filename)
+        old_path = os.path.abspath(os.path.join(src_dir, filename))
+        new_path = os.path.abspath(os.path.join(dst_dir, filename))
+        if not old_path.startswith(os.path.abspath(base_dir)) or not new_path.startswith(os.path.abspath(base_dir)):
+             return {"status": "error", "message": "Access denied"}
         
         if not os.path.exists(old_path):
              return {"status": "error", "message": f"Source file not found: {filename}"}
@@ -374,7 +437,9 @@ async def api_upload_file(file: UploadFile = File(...), sub_path: str = "", proj
         if not os.path.exists(target_dir):
             os.makedirs(target_dir, exist_ok=True)
             
-        filepath = os.path.join(target_dir, file.filename)
+        filepath = os.path.abspath(os.path.join(target_dir, file.filename))
+        if not filepath.startswith(os.path.abspath(base_dir)):
+             return {"status": "error", "message": "Access denied"}
         with open(filepath, "wb") as f:
             f.write(await file.read())
         return {"status": "ok", "message": f"Uploaded {file.filename}"}
@@ -629,6 +694,9 @@ async def websocket_endpoint(websocket: WebSocket, thread_id: str):
 
             user_input = payload.get("message", "")
             files = payload.get("files", [])
+            payload_mode = payload.get("mode", "tools_on")
+            project_id = payload.get("project_id", "default")
+            base_dir = get_project_workspace(project_id)
 
             # Handle Workspace References
             for f in files:
@@ -645,8 +713,15 @@ async def websocket_endpoint(websocket: WebSocket, thread_id: str):
                 if name and data_b64:
                     try:
                         import base64
+                        import urllib.parse
                         raw_bytes = base64.b64decode(data_b64)
-                        filepath = os.path.join(str(WORKSPACE_DIR), name)
+                        
+                        safe_name = urllib.parse.unquote(name).lstrip("/")
+                        filepath = os.path.abspath(os.path.join(base_dir, safe_name))
+                        if not filepath.startswith(os.path.abspath(base_dir)):
+                             print(f"[Workspace] Access denied for file {name} (outside workspace)")
+                             continue
+                             
                         with open(filepath, "wb") as file_out:
                             file_out.write(raw_bytes)
                         print(f"[Workspace] Saved file to {filepath}")
@@ -656,11 +731,6 @@ async def websocket_endpoint(websocket: WebSocket, thread_id: str):
             message_content = await build_message_content(user_input, files)
             if not message_content:
                 continue
-
-
-
-            payload_mode = payload.get("mode", "tools_on")
-            project_id = payload.get("project_id", "default")
 
             # Start the graph run in the session (background)
             await session.start_run(

@@ -4,7 +4,7 @@
 echo "Starting Local Cowork Agent..."
 
 # Ensure we're in the right directory
-cd /Users/tim/Documents/Owlynn
+cd "$(dirname "$0")"
 
 # Export PYTHONPATH so Python can resolve the local 'src' module
 export PYTHONPATH=$PYTHONPATH:$(pwd)
