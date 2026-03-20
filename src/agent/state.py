@@ -33,6 +33,12 @@ class AgentState(TypedDict):
     # Execution mode: 'tools_off' or 'tools_on'
     mode: str | None
 
+    # When False, complex path binds tools without web_search (UI "Web search" off).
+    web_search_enabled: bool | None
+
+    # Chat response style: normal | learning | concise | explanatory | formal
+    response_style: str | None
+
     # Project ID to associate this conversation with a specific project
     project_id: str | None
 

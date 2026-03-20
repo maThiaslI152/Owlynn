@@ -867,6 +867,10 @@ async def websocket_endpoint(websocket: WebSocket, thread_id: str):
             user_input = payload.get("message", "")
             files = payload.get("files", [])
             payload_mode = payload.get("mode", "tools_on")
+            web_search_enabled = payload.get("web_search_enabled")
+            if web_search_enabled is None:
+                web_search_enabled = True
+            response_style = (payload.get("response_style") or "normal").strip()
             project_id = payload.get("project_id", "default")
             base_dir = get_project_workspace(project_id)
 
@@ -909,6 +913,8 @@ async def websocket_endpoint(websocket: WebSocket, thread_id: str):
                 {
                     "messages": [HumanMessage(content=message_content)],
                     "mode": payload_mode,
+                    "web_search_enabled": bool(web_search_enabled),
+                    "response_style": response_style,
                     "project_id": project_id
                 },
                 config=config

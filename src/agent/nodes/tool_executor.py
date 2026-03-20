@@ -1,6 +1,7 @@
 from langchain_core.messages import SystemMessage, AIMessage
 from src.agent.state import AgentState
 from src.agent.llm import get_large_llm_with_tools
+from src.agent.lm_studio_compat import with_system_for_local_server
 from langgraph.prebuilt import ToolNode
 from src.tools import web_search, execute_python_code, read_workspace_file, recall_memories
 
@@ -28,11 +29,9 @@ async def tool_executor_node(state: AgentState) -> AgentState:
     
     messages = state.get("messages", [])
 
-    # Large model generates tool args or responds
-    response = await large_llm_with_tools.ainvoke([
-        SystemMessage(content=prompt),
-        *messages
-    ])
+    system = SystemMessage(content=prompt)
+    prompt_messages = with_system_for_local_server(system, list(messages))
+    response = await large_llm_with_tools.ainvoke(prompt_messages)
     
     updated_messages = list(messages) + [response]
     result_val = None

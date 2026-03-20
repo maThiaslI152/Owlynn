@@ -4,11 +4,27 @@ let socket = null;
 let isReasoning = false;
 let pendingFiles = []; // { name, type, data (base64), preview? }
 let currentSubPath = ''; // Tracks current folder level in workspace view
-let activeMode = 'tools_on'; // default: 'tools_on' or 'tools_off'
-let activeProjectId = 'default';
+let activeMode = 'tools_on'; // 'tools_on' = local tools + optional web (see webSearchEnabled)
+/** When false, backend omits web_search from the tool list (other tools stay on). */
+let webSearchEnabled = true;
+/** normal | learning | concise | explanatory | formal — sent to LLM system hints */
+let responseStyle = 'normal';
+let activeProjectId = null;
+let hasSelectedProject = false;
+let currentChatName = '';
 let activeAiMessage = null; 
 let lastHumanMessage = ""; // For regenerate
 let currentModelUsed = "unknown"; // Track which model is being used
+let currentView = 'welcome';
+let cachedProjects = [];
+let cachedArtifacts = [];
+let cachedTools = [];
+let cachedChats = [];
+let activeArtifactTab = 'inspiration';
+let activeArtifactFilter = 'all';
+let customizeTab = 'skills';
+let spotlightResultsFlat = [];
+let spotlightSelectedIndex = 0;
 
 // Helper function to render tool execution cards
 function renderToolExecution(toolName, status = 'running', input = null, output = null, error = null) {
@@ -94,7 +110,7 @@ const agentStatus = document.getElementById('agentStatus');
 const dragOverlay = document.getElementById('dragOverlay');
 const attachmentPreviews = document.getElementById('attachmentPreviews');
 const fileInput = document.getElementById('fileInput');
-const attachBtn = document.getElementById('attachBtn');
+const attachBtn = document.getElementById('attachBtn'); // legacy; may be null (composer + menu)
 const modeFastBtn = document.getElementById('modeFastBtn');
 const modeReasoningBtn = document.getElementById('modeReasoningBtn');
 const projectsListEl = document.getElementById('projectsList');
@@ -133,9 +149,10 @@ const memoriesListEl = document.getElementById('memoriesList');
 // Initialize
     if (sessionIdEl) sessionIdEl.value = currentSessionId;
 connectWebSocket();
+initComposerUI();
 loadSettingsData();
 loadProjects();
-loadWorkspaceFiles(); // Initial load for Workspace Files panel
+setWorkspaceVisibility();
 
 async function loadSettingsData() {
     try {
@@ -165,6 +182,8 @@ async function loadSettingsData() {
         if (profileStyleInput) profileStyleInput.value = profile.response_style || 'detailed';
         if (profileLlmUrlInput) profileLlmUrlInput.value = profile.llm_base_url || 'http://127.0.0.1:8080/v1';
         if (profileLlmModelInput) profileLlmModelInput.value = profile.llm_model_name || 'mlx-community/Qwen2-VL-7B-Instruct-4bit';
+
+        updateComposerStyleQuickLabel();
 
         // Populate Persona
         if (personaNameInput) personaNameInput.value = persona.name || '';
@@ -220,6 +239,214 @@ async function loadSettingsData() {
     } catch (e) {
         console.error('Failed to load settings data:', e);
     }
+}
+
+function updateComposerStyleQuickLabel() {
+    const el = document.getElementById('composerStyleQuickLabel');
+    const welcomeEl = document.getElementById('welcomeStyleLabel');
+    const styleMap = {
+        normal: 'Normal',
+        learning: 'Learning',
+        concise: 'Concise',
+        explanatory: 'Explanatory',
+        formal: 'Formal',
+    };
+    const text = `Style: ${styleMap[responseStyle] || 'Normal'}`;
+    if (el) el.textContent = text;
+    if (welcomeEl) welcomeEl.textContent = text;
+}
+
+function buildChatWsPayload(messageText, filesPayload) {
+    return {
+        message: messageText,
+        files: filesPayload,
+        mode: activeMode,
+        web_search_enabled: webSearchEnabled,
+        response_style: responseStyle,
+        project_id: getEffectiveProjectId(),
+    };
+}
+
+function setComposerWebSearchUI() {
+    const chk = document.getElementById('composerWebSearchCheck');
+    if (chk) chk.classList.toggle('hidden', !webSearchEnabled);
+    const row = document.getElementById('composerMenuWebSearch');
+    if (row) row.setAttribute('aria-pressed', webSearchEnabled ? 'true' : 'false');
+}
+
+function setComposerStyleUI() {
+    document.querySelectorAll('.composer-style-option').forEach((b) => {
+        const st = b.getAttribute('data-style');
+        const check = b.querySelector('.style-check');
+        const on = st === responseStyle;
+        b.classList.toggle('active-style', on);
+        if (check) check.classList.toggle('hidden', !on);
+    });
+    updateComposerStyleQuickLabel();
+}
+
+function closeComposerPlusMenu() {
+    document.getElementById('composerPlusMenu')?.classList.add('hidden');
+    document.getElementById('composerStyleSubmenu')?.classList.add('hidden');
+    document.getElementById('composerPlusBtn')?.setAttribute('aria-expanded', 'false');
+}
+
+/** Clamp for viewport positioning */
+function clampComposer(n, min, max) {
+    return Math.max(min, Math.min(max, n));
+}
+
+/**
+ * Position fixed menu above anchor. align: 'start' | 'end' (match left or right edge like style pill).
+ */
+function positionMenuAboveAnchor(menuEl, anchorEl, align = 'start', gap = 8) {
+    if (!menuEl || !anchorEl) return;
+    menuEl.style.position = 'fixed';
+    menuEl.classList.remove('hidden');
+    const ar = anchorEl.getBoundingClientRect();
+    let br = menuEl.getBoundingClientRect();
+    let top = ar.top - br.height - gap;
+    let left = align === 'end' ? ar.right - br.width : ar.left;
+    if (top < 8) {
+        top = ar.bottom + gap;
+    }
+    top = clampComposer(top, 8, window.innerHeight - br.height - 8);
+    left = clampComposer(left, 8, window.innerWidth - br.width - 8);
+    menuEl.style.top = `${Math.round(top)}px`;
+    menuEl.style.left = `${Math.round(left)}px`;
+}
+
+function positionStyleSubmenuBesideMainMenu() {
+    const main = document.getElementById('composerPlusMenu');
+    const sub = document.getElementById('composerStyleSubmenu');
+    if (!main || !sub || main.classList.contains('hidden')) return;
+    sub.style.position = 'fixed';
+    sub.classList.remove('hidden');
+    const mr = main.getBoundingClientRect();
+    let sr = sub.getBoundingClientRect();
+    let left = mr.right + 8;
+    let top = mr.bottom - sr.height;
+    if (left + sr.width > window.innerWidth - 8) {
+        left = mr.left - sr.width - 8;
+    }
+    top = clampComposer(top, 8, window.innerHeight - sr.height - 8);
+    left = clampComposer(left, 8, window.innerWidth - sr.width - 8);
+    sub.style.top = `${Math.round(top)}px`;
+    sub.style.left = `${Math.round(left)}px`;
+}
+
+function toggleComposerPlusMenu(anchorEl) {
+    const menu = document.getElementById('composerPlusMenu');
+    const sub = document.getElementById('composerStyleSubmenu');
+    const plus = document.getElementById('composerPlusBtn');
+    if (!menu || !anchorEl) return;
+    if (!menu.classList.contains('hidden')) {
+        closeComposerPlusMenu();
+        return;
+    }
+    sub?.classList.add('hidden');
+    positionMenuAboveAnchor(menu, anchorEl, 'start', 8);
+    plus?.setAttribute('aria-expanded', 'true');
+}
+
+/** Style pill: only the style list (not the full + menu). */
+function toggleStyleSubmenuOnly(anchorEl) {
+    const menu = document.getElementById('composerPlusMenu');
+    const sub = document.getElementById('composerStyleSubmenu');
+    if (!sub || !anchorEl) return;
+    if (!sub.classList.contains('hidden')) {
+        sub.classList.add('hidden');
+        return;
+    }
+    menu?.classList.add('hidden');
+    document.getElementById('composerPlusBtn')?.setAttribute('aria-expanded', 'false');
+    positionMenuAboveAnchor(sub, anchorEl, 'end', 8);
+}
+
+function initComposerUI() {
+    const plus = document.getElementById('composerPlusBtn');
+    const menu = document.getElementById('composerPlusMenu');
+    if (!plus || !menu) return;
+
+    plus.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleComposerPlusMenu(plus);
+    });
+
+    document.getElementById('composerMenuAttach')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        fileInput?.click();
+        closeComposerPlusMenu();
+    });
+
+    document.getElementById('composerMenuWebSearch')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        webSearchEnabled = !webSearchEnabled;
+        setComposerWebSearchUI();
+    });
+
+    document.getElementById('composerMenuStyleBtn')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const sub = document.getElementById('composerStyleSubmenu');
+        const main = document.getElementById('composerPlusMenu');
+        if (!sub || !main || main.classList.contains('hidden')) return;
+        if (sub.classList.contains('hidden')) {
+            positionStyleSubmenuBesideMainMenu();
+        } else {
+            sub.classList.add('hidden');
+        }
+    });
+
+    document.querySelectorAll('.composer-style-option').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            responseStyle = btn.getAttribute('data-style') || 'normal';
+            setComposerStyleUI();
+            closeComposerPlusMenu();
+        });
+    });
+
+    document.getElementById('composerMenuProject')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        closeComposerPlusMenu();
+        document.getElementById('nav-projects')?.click();
+    });
+
+    document.getElementById('composerMenuGithub')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        closeComposerPlusMenu();
+        alert('GitHub import is coming soon.');
+    });
+
+    document.getElementById('composerMenuConnectors')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        closeComposerPlusMenu();
+        document.getElementById('nav-customize')?.click();
+        document.getElementById('customizeConnectorsTabBtn')?.click();
+    });
+
+    document.getElementById('composerStyleQuickBtn')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleStyleSubmenuOnly(e.currentTarget);
+    });
+
+    document.addEventListener('click', (ev) => {
+        if (
+            ev.target.closest?.('#composerPlusBtn') ||
+            ev.target.closest?.('#composerPlusMenu') ||
+            ev.target.closest?.('#welcomeAttachBtn') ||
+            ev.target.closest?.('#welcomeStyleBtn') ||
+            ev.target.closest?.('#composerStyleQuickBtn') ||
+            ev.target.closest?.('#composerStyleSubmenu')
+        ) {
+            return;
+        }
+        closeComposerPlusMenu();
+    });
+
+    setComposerWebSearchUI();
+    setComposerStyleUI();
+    updateComposerStyleQuickLabel();
 }
 
 function renderMemories(memories) {
@@ -361,13 +588,11 @@ async function loadProjects() {
     try {
         const res = await fetch('http://127.0.0.1:8000/api/projects');
         const projects = await res.json();
+        cachedProjects = projects;
         renderProjects(projects);
-        
-        // Load active project details
-        const activeProject = projects.find(p => p.id === activeProjectId) || projects[0];
-        if (activeProject) {
-            switchProject(activeProject.id, false);
-        }
+        renderWelcomeRecents();
+        renderProjectInspector(projects.find((p) => p.id === activeProjectId) || null);
+        setWorkspaceVisibility();
     } catch (e) {
         console.error('Failed to load projects:', e);
     }
@@ -416,12 +641,17 @@ function renderProjects(projects) {
 
 async function switchProject(projectId, resetChat = true) {
     activeProjectId = projectId;
+    hasSelectedProject = true;
+    localStorage.setItem('active_project_id', projectId);
     currentSubPath = ''; // Reset folder view on project swap
+    setWorkspaceVisibility();
     loadWorkspaceFiles(); // Trigger workspace partition reload
     
     try {
         const res = await fetch(`http://127.0.0.1:8000/api/projects/${projectId}`);
         const project = await res.json();
+        currentChatName = '';
+        renderProjectInspector(project);
         
         // Update UI
         if (projectKnowledgeSection) {
@@ -438,7 +668,9 @@ async function switchProject(projectId, resetChat = true) {
         // Reload projects list to update active state
         const allRes = await fetch('http://127.0.0.1:8000/api/projects');
         const allProjects = await allRes.json();
+        cachedProjects = allProjects;
         renderProjects(allProjects);
+        renderWelcomeRecents();
         
         if (resetChat) {
             // Reset reasoning state
@@ -450,6 +682,8 @@ async function switchProject(projectId, resetChat = true) {
                 currentSessionId = savedSessionId;
                 if (sessionIdEl) sessionIdEl.value = currentSessionId;
                 await loadChatHistory(currentSessionId);
+                const selectedChat = (project.chats || []).find((c) => c.id === currentSessionId);
+                currentChatName = selectedChat?.name || '';
                 
                 // Reconnect WebSocket to the correct thread
                 if (socket) {
@@ -516,6 +750,7 @@ function renderProjectChats(chats) {
     
     sortedChats.forEach(chat => {
         const isActive = chat.id === currentSessionId;
+        if (isActive) currentChatName = chat.name || '';
         const item = document.createElement('div');
         item.className = `group flex items-center gap-2 p-2 rounded text-xs cursor-pointer transition-colors ${
             isActive ? 'bg-anthropic text-white' : 'bg-white border border-bordercolor hover:bg-gray-50'
@@ -525,7 +760,7 @@ function renderProjectChats(chats) {
         
         item.innerHTML = `
             <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${isActive ? 3 : 2}" stroke-linecap="round" stroke-linejoin="round" class="${isActive ? 'text-white' : 'text-gray-400'}"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-            <span class="truncate flex-1 font-medium">${chat.name || 'Chat'}</span>
+            <span class="truncate flex-1 font-medium">${chat.name || 'Untitled'}</span>
             <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                 <button class="edit-chat-btn p-1 rounded-md hover:bg-white/20 text-current opacity-70 hover:opacity-100" title="Rename Chat">
                     <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
@@ -554,9 +789,11 @@ function renderProjectChats(chats) {
 async function switchChat(sessionId) {
     currentSessionId = sessionId;
     if (sessionIdEl) sessionIdEl.value = currentSessionId;
+    switchView('chat');
+    setWorkspaceVisibility();
     
     // Update mapping in localStorage
-    if (activeProjectId) {
+    if (hasSelectedProject && activeProjectId) {
         localStorage.setItem(`project_session_${activeProjectId}`, currentSessionId);
     }
     
@@ -571,9 +808,11 @@ async function switchChat(sessionId) {
     connectWebSocket();
     
     // Refresh project details to update active chat highlighting
-    const res = await fetch(`http://127.0.0.1:8000/api/projects/${activeProjectId}`);
+    const res = await fetch(`http://127.0.0.1:8000/api/projects/${getEffectiveProjectId()}`);
     const project = await res.json();
     renderProjectChats(project.chats || []);
+    currentChatName = (project.chats || []).find((c) => c.id === sessionId)?.name || '';
+    renderWelcomeRecents();
 }
 
 async function editChat(chatId, currentName) {
@@ -581,31 +820,59 @@ async function editChat(chatId, currentName) {
     if (!newName || newName === currentName) return;
     
     try {
-        await fetch(`http://127.0.0.1:8000/api/projects/${activeProjectId}/chats/${chatId}`, {
+        await fetch(`http://127.0.0.1:8000/api/projects/${getEffectiveProjectId()}/chats/${chatId}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name: newName })
         });
-        switchProject(activeProjectId, false);
+        currentChatName = newName;
+        switchProject(getEffectiveProjectId(), false);
     } catch (e) {
         console.error('Failed to rename chat:', e);
     }
 }
 
 async function deleteChat(chatId, chatName) {
-    const confirmed = await showCustomConfirm('Delete Chat', `Are you sure you want to delete the chat "${chatName || 'Chat'}"?`, true);
+    const confirmed = await showCustomConfirm('Delete Chat', `Are you sure you want to delete the chat "${chatName || 'Untitled'}"?`, true);
     if (!confirmed) return;
     
     try {
-        await fetch(`http://127.0.0.1:8000/api/projects/${activeProjectId}/chats/${chatId}`, {
+        await fetch(`http://127.0.0.1:8000/api/projects/${getEffectiveProjectId()}/chats/${chatId}`, {
             method: 'DELETE'
         });
-        switchProject(activeProjectId, false);
+        switchProject(getEffectiveProjectId(), false);
         if (chatId === currentSessionId) {
              newChatBtn.click();
         }
     } catch (e) {
         console.error('Failed to delete chat:', e);
+    }
+}
+
+async function maybeAutoNameCurrentChat(userText) {
+    if (!hasSelectedProject || !activeProjectId) return;
+    if (!userText || !userText.trim()) return;
+    if (!isUntitledName(currentChatName)) return;
+
+    const nextName = deriveChatTitle(userText);
+    if (!nextName) return;
+
+    try {
+        await fetch(`http://127.0.0.1:8000/api/projects/${activeProjectId}/chats/${currentSessionId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: nextName })
+        });
+        currentChatName = nextName;
+
+        const res = await fetch(`http://127.0.0.1:8000/api/projects/${activeProjectId}`);
+        const project = await res.json();
+        renderProjectChats(project.chats || []);
+        renderProjectInspector(project);
+        cachedProjects = cachedProjects.map((p) => (p.id === activeProjectId ? project : p));
+        renderWelcomeRecents();
+    } catch (e) {
+        console.error('Failed to auto-name chat:', e);
     }
 }
 
@@ -636,8 +903,15 @@ async function deleteProject(projectId, projectName) {
         const data = await res.json();
         if (data.status === 'ok') {
              if (projectId === activeProjectId) {
-                  activeProjectId = 'default';
-                  switchProject('default');
+                  activeProjectId = null;
+                  hasSelectedProject = false;
+                  currentChatName = '';
+                  localStorage.removeItem('active_project_id');
+                  setWorkspaceVisibility();
+                  switchView('projects');
+                  renderProjectInspector(null);
+                  renderWelcomeRecents();
+                  loadProjects();
              } else {
                   loadProjects();
              }
@@ -650,7 +924,7 @@ async function deleteProject(projectId, projectName) {
 }
 
 
-addProjectBtn?.addEventListener('click', async () => {
+async function handleCreateProject() {
     const name = await showCustomInput('New Project', 'Project Name');
     if (!name) return;
     
@@ -665,10 +939,14 @@ addProjectBtn?.addEventListener('click', async () => {
         const newProject = await res.json();
         await loadProjects();
         switchProject(newProject.id);
+        switchView('chat');
     } catch (e) {
         console.error('Failed to create project:', e);
     }
-});
+}
+
+addProjectBtn?.addEventListener('click', handleCreateProject);
+document.getElementById('addProjectViewBtn')?.addEventListener('click', handleCreateProject);
 
 // ─── Event Listeners ────────────────────────────────────────────────────────
 
@@ -890,6 +1168,7 @@ saveProfileBtn?.addEventListener('click', async () => {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data)
         });
+        updateComposerStyleQuickLabel();
         alert('Profile saved!');
     } catch (e) {
         console.error(e);
@@ -936,15 +1215,17 @@ newChatBtn.addEventListener('click', async () => {
     updateAgentStatus('idle');
     
     currentSessionId = generateUUID();
+    currentChatName = 'Untitled';
     if (sessionIdEl) sessionIdEl.value = currentSessionId;
     messagesArea.innerHTML = '';
     pendingFiles = [];
     renderPreviews();
     
-    const chatName = await showCustomInput('New Chat', 'Chat Name', 'New Chat') || 'New Chat';
+    // Start as untitled/floating chat. It can be auto-renamed from the first user message.
+    const chatName = 'Untitled';
     
     // Save mapping to localStorage
-    if (activeProjectId) {
+    if (hasSelectedProject && activeProjectId) {
         localStorage.setItem(`project_session_${activeProjectId}`, currentSessionId);
         
         // Register chat with project in backend
@@ -960,6 +1241,8 @@ newChatBtn.addEventListener('click', async () => {
             const project = await res.json();
             if (projectChatsSection) projectChatsSection.classList.remove('hidden');
             renderProjectChats(project.chats || []);
+            cachedProjects = cachedProjects.map((p) => (p.id === activeProjectId ? project : p));
+            renderWelcomeRecents();
         } catch (e) {
             console.error('Failed to register chat with project:', e);
         }
@@ -970,9 +1253,8 @@ newChatBtn.addEventListener('click', async () => {
         socket.close();
     }
     connectWebSocket();
-    
-    // Welcome message
-    renderMessage({ type: 'ai', content: `**${chatName}** started. How can I help you in the workspace today?` });
+    switchView('welcome');
+    setWorkspaceVisibility();
 });
 
 // Mode Toggle Listeners
@@ -997,8 +1279,7 @@ function updateModeUI() {
     }
 }
 
-// Paperclip button opens file picker
-attachBtn.addEventListener('click', () => fileInput.click());
+attachBtn?.addEventListener('click', () => fileInput?.click());
 
 fileInput.addEventListener('change', (e) => processFiles(e.target.files));
 
@@ -1487,13 +1768,18 @@ function addMessageActions(contentDiv, textContent, wrapper) {
     const actionsDiv = document.createElement('div');
     actionsDiv.className = 'flex flex-col gap-2 mt-3 pt-2 border-t border-gray-100';
     
-    // Model info badge
-    if (currentModelUsed !== 'unknown') {
-        const infoBadge = document.createElement('div');
-        infoBadge.className = 'model-info-badge';
-        infoBadge.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M2 12h20"/></svg> <span>Model: ${DOMPurify.sanitize(currentModelUsed)}</span>`;
-        actionsDiv.appendChild(infoBadge);
-    }
+    // Show style badge instead of model badge for cleaner UX.
+    const styleMap = {
+        normal: 'Normal',
+        learning: 'Learning',
+        concise: 'Concise',
+        explanatory: 'Explanatory',
+        formal: 'Formal',
+    };
+    const infoBadge = document.createElement('div');
+    infoBadge.className = 'model-info-badge';
+    infoBadge.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20h16"/><path d="M6 16l4-8 4 6 2-3 2 5"/></svg> <span>Style: ${DOMPurify.sanitize(styleMap[responseStyle] || 'Normal')}</span>`;
+    actionsDiv.appendChild(infoBadge);
     
     const buttonsDiv = document.createElement('div');
     buttonsDiv.className = 'flex gap-2 message-actions';
@@ -1514,11 +1800,7 @@ function addMessageActions(contentDiv, textContent, wrapper) {
     regenBtn.addEventListener('click', () => {
          if (lastHumanMessage) {
               if (wrapper) wrapper.remove();
-              socket.send(JSON.stringify({ 
-                  message: lastHumanMessage, 
-                  files: [], 
-                  mode: activeMode 
-              }));
+              socket.send(JSON.stringify(buildChatWsPayload(lastHumanMessage, [])));
          }
     });
 
@@ -1537,18 +1819,19 @@ function handleSend(e) {
     
     const text = messageInput.value.trim();
     if ((!text && pendingFiles.length === 0) || socket.readyState !== WebSocket.OPEN) return;
+    if (text) {
+        maybeAutoNameCurrentChat(text);
+    }
     
     // Optimistic UI
     renderUserMessage(text, pendingFiles);
     lastHumanMessage = text; // Remember for regenerate
     
     // Send to backend with files and current mode
-    socket.send(JSON.stringify({ 
-        message: text, 
-        files: pendingFiles.map(f => ({ name: f.name, type: f.type, data: f.data, path: f.path })),
-        mode: activeMode,
-        project_id: activeProjectId
-    }));
+    socket.send(JSON.stringify(buildChatWsPayload(
+        text,
+        pendingFiles.map(f => ({ name: f.name, type: f.type, data: f.data, path: f.path }))
+    )));
 
     
     // Clear
@@ -1621,7 +1904,7 @@ function renderUserMessage(text, files = []) {
 
         if (cleanedText || Array.isArray(text)) {
             const bubble = document.createElement('div');
-            bubble.className = 'bg-userbubble text-textdark px-5 py-3 rounded-2xl text-base relative group';
+            bubble.className = 'bg-userbubble text-textdark px-5 py-3.5 rounded-[1.15rem] text-[15px] leading-relaxed border border-bordercolor/60 shadow-[0_8px_20px_rgba(2,8,22,0.24)] relative group';
             
             const textSpan = document.createElement('span');
             if (typeof text === 'string') {
@@ -1992,9 +2275,13 @@ function showCustomInput(title, label, defaultValue = '') {
 async function loadWorkspaceFiles() {
     const listEl = document.getElementById('workspaceFilesList');
     if (!listEl) return;
+    if (!hasSelectedProject) {
+        listEl.innerHTML = '<p class="text-xs text-gray-400 italic text-center py-8">Select a project to open workspace files.</p>';
+        return;
+    }
     
     try {
-        const res = await fetch(`http://127.0.0.1:8000/api/files?sub_path=${encodeURIComponent(currentSubPath)}&project_id=${activeProjectId}`);
+        const res = await fetch(`http://127.0.0.1:8000/api/files?sub_path=${encodeURIComponent(currentSubPath)}&project_id=${getEffectiveProjectId()}`);
         const files = await res.json();
         renderWorkspaceFiles(files);
         renderBreadcrumbs();
@@ -2130,7 +2417,7 @@ async function deleteWorkspaceFile(name) {
     const confirmed = await showCustomConfirm('Delete File', `Are you sure you want to delete "${name}" from the workspace?`, true);
     if (!confirmed) return;
     try {
-        await fetch(`http://127.0.0.1:8000/api/files/${encodeURIComponent(name)}?sub_path=${encodeURIComponent(currentSubPath)}&project_id=${activeProjectId}`, { method: 'DELETE' });
+        await fetch(`http://127.0.0.1:8000/api/files/${encodeURIComponent(name)}?sub_path=${encodeURIComponent(currentSubPath)}&project_id=${getEffectiveProjectId()}`, { method: 'DELETE' });
         loadWorkspaceFiles();
     } catch (e) {
         console.error('Failed to delete file:', e);
@@ -2144,7 +2431,7 @@ async function renameWorkspaceFile(name) {
         await fetch(`http://127.0.0.1:8000/api/files/${encodeURIComponent(name)}/rename`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ new_name: newName, sub_path: currentSubPath, project_id: activeProjectId })
+            body: JSON.stringify({ new_name: newName, sub_path: currentSubPath, project_id: getEffectiveProjectId() })
         });
         loadWorkspaceFiles();
     } catch (e) {
@@ -2164,7 +2451,7 @@ async function moveWorkspaceFile(filename, fullSrcPath, targetSubPath) {
             body: JSON.stringify({ 
                  current_sub_path: current_sub, 
                  target_sub_path: targetSubPath, 
-                 project_id: activeProjectId 
+                 project_id: getEffectiveProjectId() 
             })
         });
         loadWorkspaceFiles();
@@ -2190,12 +2477,13 @@ uploadWorkspaceBtn?.addEventListener('click', () => workspaceFileInput?.click())
 
 workspaceFileInput?.addEventListener('change', async (e) => {
     if (e.target.files.length === 0) return;
-    const formData = new FormData();
+
     for (const file of e.target.files) {
+        const formData = new FormData();
         formData.append('file', file);
-        // Upload immediately via POST
+
         try {
-            await fetch(`http://127.0.0.1:8000/api/upload?sub_path=${encodeURIComponent(currentSubPath)}&project_id=${activeProjectId}`, { method: 'POST', body: formData });
+            await fetch(`http://127.0.0.1:8000/api/upload?sub_path=${encodeURIComponent(currentSubPath)}&project_id=${getEffectiveProjectId()}`, { method: 'POST', body: formData });
         } catch (err) {
             console.error('Upload failed:', err);
         }
@@ -2248,7 +2536,7 @@ if (workspacePanel && workspaceDropZone) {
             const formData = new FormData();
             formData.append('file', file);
             try {
-                await fetch(`http://127.0.0.1:8000/api/upload?sub_path=${encodeURIComponent(currentSubPath)}&project_id=${activeProjectId}`, { method: 'POST', body: formData });
+                await fetch(`http://127.0.0.1:8000/api/upload?sub_path=${encodeURIComponent(currentSubPath)}&project_id=${getEffectiveProjectId()}`, { method: 'POST', body: formData });
             } catch (err) {
                 console.error('Upload failed:', err);
             }
@@ -2271,7 +2559,7 @@ async function viewWorkspaceFile(name) {
     modal.classList.remove('hidden');
     modal.classList.add('flex');
     
-    const fileUrl = `/api/files/${encodeURIComponent(name)}?sub_path=${encodeURIComponent(currentSubPath)}&project_id=${activeProjectId}`;
+    const fileUrl = `/api/files/${encodeURIComponent(name)}?sub_path=${encodeURIComponent(currentSubPath)}&project_id=${getEffectiveProjectId()}`;
     downloadBtn.onclick = () => window.open(fileUrl, '_blank');
     
     const ext = name.split('.').pop().toLowerCase();
@@ -2360,7 +2648,7 @@ document.getElementById('newFolderBtn')?.addEventListener('click', async () => {
         const res = await fetch('http://127.0.0.1:8000/api/folders', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: name, sub_path: currentSubPath, project_id: activeProjectId })
+            body: JSON.stringify({ name: name, sub_path: currentSubPath, project_id: getEffectiveProjectId() })
         });
         const data = await res.json();
         if (data.status === 'ok') {
@@ -2373,38 +2661,353 @@ document.getElementById('newFolderBtn')?.addEventListener('click', async () => {
     }
 });
 
-function showCustomInput(title, label, defaultValue) {
-    return new Promise((resolve) => {
-        const modal = document.getElementById('renameModal'); // Reuse rename Modal for input
-        const titleEl = document.getElementById('renameModalTitle');
-        const labelEl = document.getElementById('renameModalLabel');
-        const input = document.getElementById('newFilenameInput');
-        const cancelBtn = document.getElementById('cancelRenameBtn');
-        const confirmBtn = document.getElementById('confirmRenameBtn');
+// ─── Claude-like View Management ──────────────────────────────────────────
 
-        if (!modal) { resolve(null); return; }
+function normalizeText(value) {
+    return String(value || '').toLowerCase();
+}
 
-        titleEl.textContent = title;
-        labelEl.textContent = label;
-        input.value = defaultValue;
-        modal.classList.remove('hidden');
-        modal.classList.add('flex');
-        input.focus();
+function getEffectiveProjectId() {
+    return activeProjectId || 'default';
+}
 
-        const close = (val) => {
-            modal.classList.add('hidden');
-            modal.classList.remove('flex');
-            resolve(val);
-        };
+function isUntitledName(name) {
+    const value = String(name || '').trim().toLowerCase();
+    return !value || value === 'untitled' || value === 'untitled chat' || value === 'new chat';
+}
 
-        confirmBtn.onclick = () => close(input.value.trim());
-        cancelBtn.onclick = () => close(null);
-        input.onkeyup = (e) => { if (e.key === 'Enter') close(input.value.trim()); };
+function deriveChatTitle(text) {
+    const cleaned = String(text || '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    if (!cleaned) return 'Untitled';
+    const words = cleaned.split(' ').slice(0, 7).join(' ');
+    return words.length > 52 ? `${words.slice(0, 49)}...` : words;
+}
+
+function setWorkspaceVisibility() {
+    const shell = document.getElementById('appShell');
+    const workspace = document.getElementById('workspacePanel');
+    if (!shell || !workspace) return;
+
+    const narrow = window.innerWidth < 1200;
+    const showWorkspace = hasSelectedProject && currentView === 'chat' && !narrow;
+    shell.classList.toggle('workspace-hidden', !showWorkspace);
+    workspace.classList.toggle('hidden', !showWorkspace);
+    workspace.classList.toggle('xl:flex', showWorkspace);
+}
+
+function renderProjectInspector(project) {
+    const titleEl = document.getElementById('projectInspectorTitle');
+    const instructionsEl = document.getElementById('projectInspectorInstructions');
+    const usageEl = document.getElementById('projectInspectorUsage');
+    const usageBarEl = document.getElementById('projectInspectorUsageBar');
+    const metaEl = document.getElementById('projectInspectorMeta');
+    const statusEl = document.getElementById('projectInspectorStatus');
+    if (!titleEl || !instructionsEl || !usageEl || !usageBarEl || !metaEl || !statusEl) return;
+
+    if (!project) {
+        titleEl.textContent = 'No project selected';
+        instructionsEl.textContent = 'Select a project to open workspace files and keep chats organized.';
+        usageEl.textContent = '0%';
+        usageBarEl.style.width = '0%';
+        metaEl.textContent = '0 chats • 0 files';
+        statusEl.textContent = 'Pick a project to enter workspace mode.';
+        return;
+    }
+
+    const fileCount = Array.isArray(project.files) ? project.files.length : 0;
+    const chatCount = Array.isArray(project.chats) ? project.chats.length : 0;
+    const usagePercent = Math.min(100, fileCount * 8);
+    titleEl.textContent = project.name || 'Project';
+    instructionsEl.textContent = project.instructions || 'No project instructions yet.';
+    usageEl.textContent = `${usagePercent}%`;
+    usageBarEl.style.width = `${usagePercent}%`;
+    metaEl.textContent = `${chatCount} chats • ${fileCount} files`;
+    statusEl.textContent = hasSelectedProject
+        ? 'Workspace unlocked. You can upload files and start chatting.'
+        : 'Select this project to unlock its workspace.';
+}
+
+function renderWelcomeRecents() {
+    const listEl = document.getElementById('welcomeRecentList');
+    const openAllBtn = document.getElementById('welcomeOpenChatsBtn');
+    if (!listEl) return;
+
+    let candidates = [];
+    if (activeProjectId) {
+        const project = cachedProjects.find((p) => p.id === activeProjectId);
+        candidates = (project?.chats || []).map((chat) => ({
+            ...chat,
+            _projectName: project?.name || 'Project',
+            _projectId: project?.id || '',
+        }));
+    } else {
+        candidates = cachedProjects.flatMap((project) =>
+            (project?.chats || []).map((chat) => ({
+                ...chat,
+                _projectName: project?.name || 'Project',
+                _projectId: project?.id || '',
+            }))
+        );
+    }
+
+    const sorted = [...candidates]
+        .sort((a, b) => (b.created_at || 0) - (a.created_at || 0))
+        .slice(0, 5);
+
+    if (sorted.length === 0) {
+        const emptyMessage = activeProjectId
+            ? 'No chats yet. Start a conversation to see recents here.'
+            : 'Select a project or start chatting to populate recents.';
+        listEl.innerHTML = `<p class="text-xs text-gray-400 italic">${emptyMessage}</p>`;
+        if (openAllBtn) openAllBtn.classList.add('opacity-40', 'pointer-events-none');
+        return;
+    }
+    if (openAllBtn) openAllBtn.classList.remove('opacity-40', 'pointer-events-none');
+
+    listEl.innerHTML = '';
+    sorted.forEach((chat) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'welcome-recent-item w-full text-left px-3 py-2 rounded-xl';
+        btn.innerHTML = `
+            <div class="flex items-center justify-between gap-2">
+                <span class="text-sm font-medium text-textdark truncate">${DOMPurify.sanitize(chat.name || 'Untitled')}</span>
+                <span class="text-[10px] text-gray-400 whitespace-nowrap">${chat.created_at ? new Date(chat.created_at * 1000).toLocaleDateString() : ''}</span>
+            </div>
+            <div class="mt-1 text-[11px] text-gray-500 truncate">${DOMPurify.sanitize(chat._projectName || 'Project')}</div>
+        `;
+        btn.addEventListener('click', async () => {
+            if (chat._projectId && chat._projectId !== activeProjectId) {
+                await switchProject(chat._projectId, false);
+            }
+            await switchChat(chat.id);
+            switchView('chat');
+        });
+        listEl.appendChild(btn);
     });
 }
 
-// ─── Claude-like View Management ──────────────────────────────────────────
-let currentView = 'welcome';
+function setCustomizeTab(tabName) {
+    customizeTab = tabName;
+    const skillsBtn = document.getElementById('customizeSkillsTabBtn');
+    const connectorsBtn = document.getElementById('customizeConnectorsTabBtn');
+    const skillsPanel = document.getElementById('customizeSkillsPanel');
+    const connectorsPanel = document.getElementById('customizeConnectorsPanel');
+
+    if (skillsBtn && connectorsBtn) {
+        if (tabName === 'connectors') {
+            connectorsBtn.className = 'w-full text-left px-3 py-1.5 rounded-lg bg-white border border-anthropic/20 font-medium text-sm';
+            skillsBtn.className = 'w-full text-left px-3 py-1.5 rounded-lg text-gray-600 hover:bg-gray-50 text-sm';
+        } else {
+            skillsBtn.className = 'w-full text-left px-3 py-1.5 rounded-lg bg-white border border-anthropic/20 font-medium text-sm';
+            connectorsBtn.className = 'w-full text-left px-3 py-1.5 rounded-lg text-gray-600 hover:bg-gray-50 text-sm';
+        }
+    }
+
+    if (skillsPanel && connectorsPanel) {
+        if (tabName === 'connectors') {
+            skillsPanel.classList.add('hidden');
+            connectorsPanel.classList.remove('hidden');
+            loadConnectorsList();
+        } else {
+            connectorsPanel.classList.add('hidden');
+            skillsPanel.classList.remove('hidden');
+            loadSkillsList();
+        }
+    }
+}
+
+function applyProjectsFilter() {
+    const container = document.getElementById('projectsGridContainer');
+    if (!container) return;
+    const q = normalizeText(document.getElementById('projectsSearchInput')?.value);
+    const filtered = cachedProjects.filter(p => {
+        return normalizeText(p.name).includes(q) || normalizeText(p.instructions).includes(q);
+    });
+
+    container.innerHTML = '';
+    if (filtered.length === 0) {
+        container.innerHTML = '<p class="text-xs text-gray-400">No projects match your search.</p>';
+        return;
+    }
+
+    filtered.forEach(p => {
+        const card = document.createElement('div');
+        const isActive = p.id === activeProjectId && hasSelectedProject;
+        card.className = `p-4 bg-cloud border border-bordercolor rounded-xl hover:shadow-md transition-shadow cursor-pointer flex flex-col gap-1 ${isActive ? 'project-card-active' : ''}`;
+        card.onclick = () => {
+            switchProject(p.id);
+            switchView('chat');
+        };
+        card.onmouseenter = () => renderProjectInspector(p);
+        card.onmouseleave = () => renderProjectInspector(cachedProjects.find((project) => project.id === activeProjectId) || null);
+        card.innerHTML = `
+            <h3 class="font-semibold text-sm text-textdark">${DOMPurify.sanitize(p.name)}</h3>
+            <p class="text-xs text-gray-500">${DOMPurify.sanitize(p.instructions || 'No description')}</p>
+            <div class="mt-2 flex items-center justify-between text-[10px] text-gray-400 border-t pt-2 border-bordercolor">
+                <span>${p.chats ? p.chats.length : 0} chats</span>
+                <span>${p.files ? p.files.length : 0} files</span>
+            </div>
+        `;
+        container.appendChild(card);
+    });
+}
+
+function applyArtifactsFilter() {
+    const container = document.getElementById('artifactsGridContainer');
+    if (!container) return;
+
+    const filtered = cachedArtifacts.filter((a) => {
+        if (activeArtifactTab === 'mine' && !a.is_mine) return false;
+        if (activeArtifactTab === 'inspiration' && a.is_mine) return false;
+        const category = normalizeText(a.category);
+        if (activeArtifactFilter === 'learn') return category.includes('learn');
+        if (activeArtifactFilter === 'life') return category.includes('life');
+        return true;
+    });
+
+    container.innerHTML = '';
+    if (filtered.length === 0) {
+        container.innerHTML = '<p class="text-xs text-gray-400">No artifacts found for this filter.</p>';
+        return;
+    }
+
+    filtered.forEach(a => {
+        const card = document.createElement('div');
+        card.className = 'border border-bordercolor rounded-xl overflow-hidden hover:shadow-md transition-shadow cursor-pointer bg-white';
+        card.innerHTML = `
+            <img src="${a.image_url}" class="w-full h-32 object-cover bg-gray-50" alt="${a.name}">
+            <div class="p-3 space-y-1">
+                <span class="text-[10px] bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded-full">${a.category}</span>
+                <h4 class="font-medium text-sm text-textdark truncate">${a.name}</h4>
+                <p class="text-xs text-gray-500 line-clamp-2">${a.description}</p>
+            </div>
+        `;
+        container.appendChild(card);
+    });
+}
+
+function applyChatsFilter() {
+    const container = document.getElementById('chatsListContainer');
+    if (!container) return;
+    const q = normalizeText(document.getElementById('chatsSearchInput')?.value);
+    const filtered = cachedChats.filter(chat => normalizeText(chat.name || 'Untitled Chat').includes(q));
+
+    container.innerHTML = '';
+    if (filtered.length === 0) {
+        container.innerHTML = '<p class="text-xs text-gray-400 italic">No chats match your search</p>';
+        return;
+    }
+
+    filtered.forEach(chat => {
+        const item = document.createElement('div');
+        item.className = 'p-3 bg-white border border-bordercolor rounded-xl hover:shadow-sm transition-shadow cursor-pointer flex items-center justify-between';
+        item.onclick = () => {
+            switchChat(chat.id);
+            switchView('chat');
+        };
+        item.innerHTML = `
+            <div class="flex items-center gap-3">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-gray-400"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                <span class="text-sm font-medium text-textdark truncate">${chat.name || 'Untitled Chat'}</span>
+            </div>
+            <span class="text-[11px] text-gray-400">${new Date(chat.created_at * 1000).toLocaleDateString()}</span>
+        `;
+        container.appendChild(item);
+    });
+}
+
+function spotlightApplySelectionHighlight() {
+    document.querySelectorAll('.spotlight-result').forEach((el, i) => {
+        el.classList.toggle('spotlight-result-active', i === spotlightSelectedIndex);
+    });
+}
+
+async function spotlightActivateItem(item) {
+    if (!item) return;
+    if (item.type === 'chat') {
+        await switchChat(item.id);
+        switchView('chat');
+    } else {
+        await switchProject(item.id);
+        switchView('chat');
+    }
+    closeSearchModal();
+}
+
+function renderSpotlightResults(query) {
+    const container = document.getElementById('spotlightResults');
+    if (!container) return;
+
+    const q = normalizeText(query);
+    const projectMatches = cachedProjects.filter(p =>
+        normalizeText(p.name).includes(q) || normalizeText(p.instructions).includes(q)
+    );
+    const chatMatches = cachedChats.filter(c =>
+        normalizeText(c.name || 'Untitled Chat').includes(q)
+    );
+
+    const maxEach = q ? 40 : 20;
+    const projects = projectMatches.slice(0, maxEach).map(p => ({
+        type: 'project',
+        id: p.id,
+        title: p.name,
+        subtitle: p.instructions ? String(p.instructions).slice(0, 80) : 'Project'
+    }));
+    const chats = chatMatches.slice(0, maxEach).map(c => ({
+        type: 'chat',
+        id: c.id,
+        title: c.name || 'Untitled',
+        subtitle: 'Chat'
+    }));
+
+    spotlightResultsFlat = [...projects, ...chats];
+    spotlightSelectedIndex = spotlightResultsFlat.length ? 0 : -1;
+
+    if (!spotlightResultsFlat.length) {
+        container.innerHTML = `<p class="px-4 py-6 text-xs text-center text-gray-500">${q ? 'No matches.' : 'No chats or projects yet.'}</p>`;
+        return;
+    }
+
+    container.innerHTML = '';
+    spotlightResultsFlat.forEach((item, index) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = `spotlight-result ${index === 0 ? 'spotlight-result-active' : ''}`;
+        btn.dataset.spotlightIndex = String(index);
+        const kind = item.type === 'project' ? 'Project' : 'Chat';
+        btn.innerHTML = `
+            <span class="text-[10px] uppercase tracking-wider text-gray-500 w-14 shrink-0">${kind}</span>
+            <span class="flex-1 min-w-0">
+                <span class="block font-medium truncate">${item.title}</span>
+                ${item.subtitle && item.subtitle !== 'Chat' ? `<span class="block text-[11px] text-gray-500 truncate">${item.subtitle}</span>` : ''}
+            </span>
+        `;
+        btn.addEventListener('click', () => spotlightActivateItem(item));
+        container.appendChild(btn);
+    });
+}
+
+function closeSearchModal() {
+    const modal = document.getElementById('searchModal');
+    if (!modal) return;
+    modal.classList.add('hidden');
+}
+
+async function openSearchModal() {
+    const modal = document.getElementById('searchModal');
+    const input = document.getElementById('popupSearchInput');
+    if (!modal || !input) return;
+    modal.classList.remove('hidden');
+    const results = document.getElementById('spotlightResults');
+    if (results) results.innerHTML = '<p class="px-4 py-3 text-xs text-gray-500">Loading…</p>';
+    input.value = '';
+    const loaded = await loadSearchViewData();
+    if (loaded) renderSpotlightResults('');
+    setTimeout(() => input.focus(), 20);
+}
 
 function switchView(viewName) {
     currentView = viewName;
@@ -2432,14 +3035,26 @@ function switchView(viewName) {
     // Load data conditionally
     if (viewName === 'projects') loadProjectsGrid();
     if (viewName === 'artifacts') loadArtifactsGrid();
-    if (viewName === 'customize') loadSkillsList();
+    if (viewName === 'customize') setCustomizeTab(customizeTab);
     if (viewName === 'chats') loadChatsList();
+    if (viewName === 'welcome') renderWelcomeRecents();
+
+    document.querySelectorAll('.mobile-nav-btn').forEach((btn) => {
+        const isActive = btn.getAttribute('data-mobile-view') === viewName;
+        btn.classList.toggle('bg-anthropic/20', isActive);
+        btn.classList.toggle('text-anthropic', isActive);
+    });
+    setWorkspaceVisibility();
 }
 
 function initNavigation() {
     document.querySelectorAll('.nav-item').forEach(item => {
         item.addEventListener('click', () => {
             const view = item.getAttribute('data-view');
+            if (view === 'search') {
+                openSearchModal();
+                return;
+            }
             if (view) switchView(view);
         });
     });
@@ -2451,7 +3066,7 @@ function initNavigation() {
     if (welcomeInput && welcomeSendBtn) {
         welcomeSendBtn.addEventListener('click', () => {
             const text = welcomeInput.value.trim();
-            if (!text) return;
+            if (!text && pendingFiles.length === 0) return;
             
             // Switch to Chat View
             switchView('chat');
@@ -2472,13 +3087,85 @@ function initNavigation() {
         });
     }
 
-    // New Chat Button override to show Welcome screen
-    const originalNewChatBtn = document.getElementById('newChatBtn');
-    if (originalNewChatBtn) {
-        originalNewChatBtn.addEventListener('click', () => {
-            switchView('welcome');
+    document.getElementById('welcomeAttachBtn')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const btn = document.getElementById('welcomeAttachBtn');
+        if (btn) toggleComposerPlusMenu(btn);
+    });
+    document.getElementById('welcomeStyleBtn')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const btn = document.getElementById('welcomeStyleBtn');
+        if (btn) toggleStyleSubmenuOnly(btn);
+    });
+
+    document.getElementById('connectToolsBar')?.addEventListener('click', () => {
+        switchView('customize');
+        setCustomizeTab('connectors');
+    });
+
+    document.getElementById('welcomeOpenChatsBtn')?.addEventListener('click', () => {
+        switchView('chats');
+    });
+
+    document.querySelectorAll('.mobile-nav-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const view = btn.getAttribute('data-mobile-view');
+            if (view) switchView(view);
         });
-    }
+    });
+
+    document.getElementById('projectsSearchInput')?.addEventListener('input', applyProjectsFilter);
+    document.getElementById('chatsSearchInput')?.addEventListener('input', applyChatsFilter);
+    document.getElementById('popupSearchInput')?.addEventListener('input', (e) => renderSpotlightResults(e.target.value));
+    document.getElementById('popupSearchInput')?.addEventListener('keydown', (e) => {
+        const modal = document.getElementById('searchModal');
+        if (!modal || modal.classList.contains('hidden')) return;
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            if (spotlightResultsFlat.length) {
+                spotlightSelectedIndex = Math.min(spotlightSelectedIndex + 1, spotlightResultsFlat.length - 1);
+                spotlightApplySelectionHighlight();
+            }
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            if (spotlightResultsFlat.length) {
+                spotlightSelectedIndex = Math.max(spotlightSelectedIndex - 1, 0);
+                spotlightApplySelectionHighlight();
+            }
+        } else if (e.key === 'Enter') {
+            e.preventDefault();
+            const item = spotlightResultsFlat[spotlightSelectedIndex];
+            if (item) spotlightActivateItem(item);
+        }
+    });
+    document.getElementById('searchModal')?.addEventListener('click', (e) => {
+        if (e.target === document.getElementById('searchModal')) closeSearchModal();
+    });
+
+    document.querySelectorAll('.artifact-tab').forEach(btn => {
+        btn.addEventListener('click', () => {
+            activeArtifactTab = btn.dataset.artifactTab || 'inspiration';
+            document.querySelectorAll('.artifact-tab').forEach(tab => {
+                tab.className = 'artifact-tab pb-2 text-gray-500 hover:text-gray-700';
+            });
+            btn.className = 'artifact-tab pb-2 border-b-2 border-anthropic font-medium text-gray-800';
+            applyArtifactsFilter();
+        });
+    });
+
+    document.querySelectorAll('.artifact-filter').forEach(btn => {
+        btn.addEventListener('click', () => {
+            activeArtifactFilter = btn.dataset.artifactFilter || 'all';
+            document.querySelectorAll('.artifact-filter').forEach(filterBtn => {
+                filterBtn.className = 'artifact-filter px-3 py-1.5 bg-gray-50 hover:bg-gray-100 text-gray-600 rounded-full border border-gray-100';
+            });
+            btn.className = 'artifact-filter px-3 py-1.5 bg-black text-white rounded-full';
+            applyArtifactsFilter();
+        });
+    });
+
+    document.getElementById('customizeSkillsTabBtn')?.addEventListener('click', () => setCustomizeTab('skills'));
+    document.getElementById('customizeConnectorsTabBtn')?.addEventListener('click', () => setCustomizeTab('connectors'));
 }
 
 async function loadProjectsGrid() {
@@ -2488,24 +3175,9 @@ async function loadProjectsGrid() {
     
     try {
         const res = await fetch('http://127.0.0.1:8000/api/projects');
-        const projects = await res.json();
-        container.innerHTML = '';
-        projects.forEach(p => {
-            const card = document.createElement('div');
-            card.className = 'p-4 bg-cloud border border-bordercolor rounded-xl hover:shadow-md transition-shadow cursor-pointer flex flex-col gap-1';
-            card.onclick = () => {
-                switchProject(p.id);
-                switchView('chat');
-            };
-            card.innerHTML = `
-                <h3 class="font-semibold text-sm text-textdark">${p.name}</h3>
-                <p class="text-xs text-gray-500">${p.instructions || 'No description'}</p>
-                <div class="mt-2 flex items-center justify-between text-[10px] text-gray-400 border-t pt-2 border-bordercolor">
-                    <span>${p.chats ? p.chats.length : 0} chats</span>
-                </div>
-            `;
-            container.appendChild(card);
-        });
+        cachedProjects = await res.json();
+        applyProjectsFilter();
+        renderProjectInspector(cachedProjects.find((p) => p.id === activeProjectId) || null);
     } catch (e) {
         container.innerHTML = '<p class="text-xs text-red-500">Failed to load projects</p>';
     }
@@ -2518,21 +3190,8 @@ async function loadArtifactsGrid() {
     
     try {
         const res = await fetch('http://127.0.0.1:8000/api/artifacts');
-        const artifacts = await res.json();
-        container.innerHTML = '';
-        artifacts.forEach(a => {
-            const card = document.createElement('div');
-            card.className = 'border border-bordercolor rounded-xl overflow-hidden hover:shadow-md transition-shadow cursor-pointer bg-white';
-            card.innerHTML = `
-                <img src="${a.image_url}" class="w-full h-32 object-cover bg-gray-50" alt="${a.name}">
-                <div class="p-3 space-y-1">
-                    <span class="text-[10px] bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded-full">${a.category}</span>
-                    <h4 class="font-medium text-sm text-textdark truncate">${a.name}</h4>
-                    <p class="text-xs text-gray-500 line-clamp-2">${a.description}</p>
-                </div>
-            `;
-            container.appendChild(card);
-        });
+        cachedArtifacts = await res.json();
+        applyArtifactsFilter();
     } catch (e) {
         container.innerHTML = '<p class="text-xs text-red-500">Failed to load artifacts</p>';
     }
@@ -2545,9 +3204,9 @@ async function loadSkillsList() {
     
     try {
         const res = await fetch('http://127.0.0.1:8000/api/tools');
-        const tools = await res.json();
+        cachedTools = await res.json();
         container.innerHTML = '';
-        tools.forEach(t => {
+        cachedTools.forEach(t => {
             const item = document.createElement('div');
             item.className = 'p-3 border border-bordercolor rounded-xl flex items-start justify-between hover:bg-cloud/50 transition-colors bg-white';
             item.innerHTML = `
@@ -2571,43 +3230,125 @@ async function loadSkillsList() {
     }
 }
 
+function loadConnectorsList() {
+    const container = document.getElementById('connectorsListContainer');
+    if (!container) return;
+    container.innerHTML = '';
+
+    if (!cachedTools.length) {
+        container.innerHTML = '<p class="text-xs text-gray-400">No connectors available.</p>';
+        return;
+    }
+
+    cachedTools.forEach((tool) => {
+        const item = document.createElement('div');
+        const requiresAuth = Boolean(tool?.auth_required || tool?.requires_auth || tool?.name === 'mcp_auth');
+        item.className = 'p-3 border border-bordercolor rounded-xl bg-white flex items-center justify-between';
+        item.innerHTML = `
+            <div>
+                <p class="text-sm font-medium text-textdark">${tool.name}</p>
+                <p class="text-xs text-gray-500">${tool.description || 'Connector integration'}</p>
+            </div>
+            <span class="text-[10px] px-2 py-1 rounded-full ${requiresAuth ? 'bg-yellow-50 text-yellow-700 border border-yellow-300' : 'bg-green-50 text-green-700 border border-green-300'}">
+                ${requiresAuth ? 'Needs setup' : 'Ready'}
+            </span>
+        `;
+        container.appendChild(item);
+    });
+}
+
 async function loadChatsList() {
     const container = document.getElementById('chatsListContainer');
     if (!container) return;
+    if (!hasSelectedProject) {
+        container.innerHTML = '<p class="text-xs text-gray-400 italic">Select a project to browse chats.</p>';
+        return;
+    }
     container.innerHTML = '<p class="text-xs text-gray-400">Loading chats...</p>';
     
     try {
-        const res = await fetch(`http://127.0.0.1:8000/api/projects/${activeProjectId}`);
+        const res = await fetch(`http://127.0.0.1:8000/api/projects/${getEffectiveProjectId()}`);
         const project = await res.json();
         container.innerHTML = '';
-        
-        const chats = project.chats || [];
-        if (chats.length === 0) {
+        cachedChats = project.chats || [];
+        if (cachedChats.length === 0) {
             container.innerHTML = '<p class="text-xs text-gray-400 italic">No chats in this project</p>';
             return;
         }
-
-        chats.forEach(chat => {
-            const item = document.createElement('div');
-            item.className = 'p-3 bg-white border border-bordercolor rounded-xl hover:shadow-sm transition-shadow cursor-pointer flex items-center justify-between';
-            item.onclick = () => {
-                switchChat(chat.id);
-                switchView('chat');
-            };
-            item.innerHTML = `
-                <div class="flex items-center gap-3">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-gray-400"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-                    <span class="text-sm font-medium text-textdark truncate">${chat.name || 'Untitled Chat'}</span>
-                </div>
-                <span class="text-[11px] text-gray-400">${new Date(chat.created_at * 1000).toLocaleDateString()}</span>
-            `;
-            container.appendChild(item);
-        });
+        applyChatsFilter();
     } catch (e) {
         container.innerHTML = '<p class="text-xs text-red-500">Failed to load chats</p>';
     }
 }
 
+async function loadSearchViewData() {
+    try {
+        const [projectsRes, projectRes] = await Promise.all([
+            fetch('http://127.0.0.1:8000/api/projects'),
+            fetch(`http://127.0.0.1:8000/api/projects/${getEffectiveProjectId()}`)
+        ]);
+        cachedProjects = await projectsRes.json();
+        const activeProject = await projectRes.json();
+        cachedChats = activeProject.chats || [];
+        return true;
+    } catch (e) {
+        const el = document.getElementById('spotlightResults');
+        if (el) el.innerHTML = '<p class="px-4 py-6 text-xs text-center text-red-400">Could not load search. Check the API is running.</p>';
+        return false;
+    }
+}
+
+function focusPrimaryInput() {
+    const activeInput = currentView === 'welcome'
+        ? document.getElementById('welcomeInput')
+        : messageInput;
+
+    if (!activeInput) return;
+    activeInput.focus();
+    const len = activeInput.value?.length || 0;
+    if (typeof activeInput.setSelectionRange === 'function') {
+        activeInput.setSelectionRange(len, len);
+    }
+}
+
+// Keyboard QoL shortcuts:
+// - Cmd/Ctrl+K: focus current prompt input
+// - Cmd/Ctrl+Enter: send from active view input
+document.addEventListener('keydown', (e) => {
+    const isMeta = e.metaKey || e.ctrlKey;
+    if (!isMeta) return;
+    const settingsOpen = settingsModal && !settingsModal.classList.contains('hidden');
+    if (settingsOpen) return;
+
+    if (e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        focusPrimaryInput();
+        return;
+    }
+
+    if (e.key === 'Enter') {
+        e.preventDefault();
+        if (currentView === 'welcome') {
+            document.getElementById('welcomeSendBtn')?.click();
+        } else {
+            chatForm?.dispatchEvent(new Event('submit'));
+        }
+    }
+});
+
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        closeSearchModal();
+        closeComposerPlusMenu();
+    }
+});
+
+window.addEventListener('resize', () => {
+    closeComposerPlusMenu();
+    setWorkspaceVisibility();
+});
+
 // Trigger initializations
 if (typeof switchView === 'function') switchView('welcome');
 if (typeof initNavigation === 'function') initNavigation();
+renderWelcomeRecents();

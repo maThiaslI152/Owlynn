@@ -7,10 +7,17 @@ A private, local-first autonomous agent based on Anthropic’s Cowork platform. 
 For detailed guides and architecture, refer to the `docs/` folder:
 
 *   **[Architecture Overview](docs/ARCHITECTURE_OVERVIEW.md)**: High-level system design and LangGraph flow describing current logic.
+*   **[Chat & Events Protocol](docs/CHAT_PROTOCOL.md)**: WebSocket payload/event contract
+*   **[Agent Flow](docs/AGENT_FLOW.md)**: Node-by-node LangGraph execution
+*   **[Tools & Tool Binding](docs/TOOLS.md)**: Which tools are bound/executed in `complex`
+*   **[API Reference](docs/API_REFERENCE.md)**: REST endpoints and WebSocket entrypoint
+*   **[Extending the Agent](docs/EXTENDING_AGENT.md)**: Where to change routing/tools/memory safely
 *   **Guides**:
     *   **[Quickstart](docs/guides/quickstart.md)**: Setup and run the application.
     *   **[Backend Integration](docs/guides/backend_integration.md)**: Details on tool execution events and WebSocket updates.
     *   **[Frontend Update](docs/guides/frontend_update.md)**: Details on the Cowork-style interface and setting options.
+    *   **[LLM Chat Prompt Test](docs/guides/llm_chat_prompt_test.md)**: Manual verification prompts for routing, memory, and tool behavior.
+    *   **[LM Studio / Qwen Jinja](docs/guides/lm_studio.md)**: Fixing “No user query found in messages” with local inference.
     *   **[File Formats](docs/guides/file_formats.md)**: Supported document types and processing.
     *   **[Browser Automation](docs/guides/lightpanda.md)**: setup and use Lightpanda for dynamic crawling.
     *   **[M4 Deployment](docs/guides/m4_deployment.md)**: Optimization strategies for Apple Silicon Macs.
@@ -30,8 +37,8 @@ For detailed guides and architecture, refer to the `docs/` folder:
 
 - **Orchestrator:** LangGraph (Stateful, cyclic graph-based logic)
 - **Brain:** Local LLM running via LLM Server (e.g., MLX or LM Studio)
-- **Short-term Memory:** Redis (Thread-level checkpointer for LangGraph)
-- **Long-term Memory:** ChromaDB + Mem0 (Cross-thread semantic retrieval)
+- **Short-term Memory:** LangGraph checkpointer (`MemorySaver` by default, best-effort `AsyncRedisSaver` fallback when Redis is available)
+- **Long-term Memory:** Mem0 (personal assistant topic/interest extraction + enriched facts) and the local memory retrieval used by `memory_inject`
 - **Execution Sandbox:** Podman container with mounted workspace volume
 
 ## Prerequisites

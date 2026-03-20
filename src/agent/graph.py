@@ -31,7 +31,7 @@ def build_graph():
     builder.add_node("memory_inject", memory_inject_node)  # Enriches context
     builder.add_node("router",        router_node)         # Small model - decide path
     builder.add_node("simple",        simple_node)         # Small model - quick response
-    builder.add_node("complex",       complex_node)        # Large model - reasoning + tools
+    builder.add_node("complex",       complex_node)        # Large model + tools when mode=tools_on
     builder.add_node("memory_write",  memory_write_node)   # Save to memory
     
     # --- Entry point ---

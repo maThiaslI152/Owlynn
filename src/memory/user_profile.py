@@ -34,7 +34,10 @@ _DEFAULTS = {
     "top_k": 40,
     "streaming_enabled": True,
     "show_thinking": False,
-    "show_tool_execution": True
+    "show_tool_execution": True,
+    # LM Studio / Qwen Jinja: merge system into first user message to avoid
+    # "No user query found in messages" when using the local OpenAI server.
+    "lm_studio_fold_system": True,
 }
 
 VALID_FIELDS = {
@@ -62,7 +65,8 @@ VALID_FIELDS = {
     "top_k": int,
     "streaming_enabled": bool,
     "show_thinking": bool,
-    "show_tool_execution": bool
+    "show_tool_execution": bool,
+    "lm_studio_fold_system": bool,
 }
 
 

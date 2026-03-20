@@ -214,13 +214,14 @@ Access settings to customize:
 - Try refreshing the page
 
 ### Tool cards not showing?
-- Backend must support tool_execution events
+- The UI currently renders tool calls/results via `type: "message"` events (AIMessage `tool_calls` and ToolMessage outputs).
+- `type: "tool_execution"` is an optional event; if you rely on it, implement/forward it in the backend.
 - Check WebSocket connection (green dot in sidebar)
 - Look for browser errors in console
 
 ### Model badge not showing?
-- Backend must send `type: "model_info"` events
-- Check user hasn't disabled model info in settings
+- The current backend does not emit `type: "model_info"` events.
+- The UI primarily shows the *response style* badge; verify you’re checking the right indicator.
 
 ## 🌐 Browser Support
 

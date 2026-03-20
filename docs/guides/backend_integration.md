@@ -3,6 +3,10 @@
 ## Overview
 This guide explains how to modify your backend to fully support the new chat experience improvements.
 
+Current repo behavior note:
+- The UI can render tool calls and tool results via the existing `type: "message"` event stream (AIMessage `tool_calls` and ToolMessage outputs).
+- The `type: "tool_execution"` and `type: "model_info"` events shown in this guide are optional enhancements; if you implement them, follow the payload shapes documented in `docs/CHAT_PROTOCOL.md`.
+
 ## 1. Tool Execution Events
 
 ### Modify `src/agent/nodes/tool_executor.py`

@@ -30,11 +30,13 @@ async def test_tool_executor_node_with_tool_call():
     
     mock_llm.ainvoke.side_effect = [first_response, second_response]
 
-    # 2. Setup Mock for ToolNode
+    # 2. Setup Mock for ToolNode (full chain: human + AI tool call + tool result)
+    human = HumanMessage(content="Search for X")
     mock_tool_output = {
         "messages": [
-            first_response, 
-            ToolMessage(content="SearchResult: found 42", tool_call_id="call_123")
+            human,
+            first_response,
+            ToolMessage(content="SearchResult: found 42", tool_call_id="call_123"),
         ]
     }
     mock_tool_node = AsyncMock()
@@ -48,7 +50,7 @@ async def test_tool_executor_node_with_tool_call():
     }
 
     # 4. Patch dependencies
-    with patch('src.agent.nodes.tool_executor.large_llm_with_tools', mock_llm), \
+    with patch('src.agent.nodes.tool_executor.get_large_llm_with_tools', AsyncMock(return_value=mock_llm)), \
          patch('src.agent.nodes.tool_executor.tool_node', mock_tool_node):
          
         result = await tool_executor_node(state)
@@ -78,11 +80,11 @@ async def test_tool_executor_node_no_tool_call():
         "selected_tool": "web_search"
     }
 
-    with patch('src.agent.nodes.tool_executor.large_llm_with_tools', mock_llm):
+    with patch('src.agent.nodes.tool_executor.get_large_llm_with_tools', AsyncMock(return_value=mock_llm)):
         result = await tool_executor_node(state)
 
     messages = result["messages"]
     assert len(messages) == 2
     assert isinstance(messages[1], AIMessage)
-    assert "Directly" in messages[1].content
+    assert "directly" in messages[1].content.lower()
     assert "did not issue a tool call" in result["tool_result"]
