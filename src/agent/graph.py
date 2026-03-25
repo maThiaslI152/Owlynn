@@ -1,14 +1,13 @@
 """
-LangGraph Orchestration with Tool Selection Flow.
+LangGraph orchestration with a secure cyclic tool flow.
 """
 
-from langgraph.graph import StateGraph, START, END
+from langgraph.graph import StateGraph, END
 from src.agent.state import AgentState
 from src.agent.nodes.router import router_node
 from src.agent.nodes.simple import simple_node
-from src.agent.nodes.complex import complex_node
-from src.agent.nodes.tool_selector import tool_selector_node
-from src.agent.nodes.tool_executor import tool_executor_node
+from src.agent.nodes.complex import complex_llm_node, complex_tool_action_node
+from src.agent.nodes.security_proxy import security_proxy_node
 from src.agent.nodes.memory import memory_inject_node, memory_write_node
 
 import logging
@@ -16,50 +15,66 @@ logger = logging.getLogger(__name__)
 
 def route_decision(state: AgentState) -> str:
     route = state.get("route", "complex")
-    # Adapt routing logic to match suggestion
-    valid = {"simple", "complex", "tool", "memory"}
+    valid = {"simple", "complex"}
     return route if route in valid else "complex"
+
+
+def llm_next_step(state: AgentState) -> str:
+    return "security_proxy" if bool(state.get("pending_tool_calls")) else "memory_write"
+
+
+def security_next_step(state: AgentState) -> str:
+    return "tool_action" if bool(state.get("execution_approved")) else "memory_write"
+
 
 def build_graph():
     """
-    Optimized LangGraph for Mac M4 - streamlined routing with 2 main paths.
-    Removes extra tool_selector node for faster execution.
+    Stateful cyclic LangGraph with mandatory security proxy before tool execution.
+
+    Flow:
+      memory_inject -> router -> simple -> memory_write -> END
+                               complex_llm -> (if tool call) security_proxy
+                               security_proxy -> tool_action -> complex_llm (loop)
+                               complex_llm -> (if direct answer) memory_write -> END
     """
     builder = StateGraph(AgentState)
-    
-    # --- Register core nodes (simplified for M4 efficiency) ---
-    builder.add_node("memory_inject", memory_inject_node)  # Enriches context
-    builder.add_node("router",        router_node)         # Small model - decide path
-    builder.add_node("simple",        simple_node)         # Small model - quick response
-    builder.add_node("complex",       complex_node)        # Large model + tools when mode=tools_on
-    builder.add_node("memory_write",  memory_write_node)   # Save to memory
-    
-    # --- Entry point ---
+
+    builder.add_node("memory_inject", memory_inject_node)
+    builder.add_node("router", router_node)
+    builder.add_node("simple", simple_node)
+    builder.add_node("complex_llm", complex_llm_node)
+    builder.add_node("security_proxy", security_proxy_node)
+    builder.add_node("tool_action", complex_tool_action_node)
+    builder.add_node("memory_write", memory_write_node)
+
     builder.set_entry_point("memory_inject")
-    
-    # --- Linear: memory inject -> router ---
     builder.add_edge("memory_inject", "router")
-    
-    # --- Optimized conditional branching (2 paths instead of 4) ---
+
     builder.add_conditional_edges("router", route_decision, {
-        "simple":  "simple",   # Quick responses via small model
-        "complex": "complex",  # Deep reasoning + tools via large model
+        "simple": "simple",
+        "complex": "complex_llm",
     })
-    
-    # --- All paths converge to memory_write for persistence ---
-    builder.add_edge("simple",   "memory_write")
-    builder.add_edge("complex",  "memory_write")
+
+    builder.add_conditional_edges("complex_llm", llm_next_step, {
+        "security_proxy": "security_proxy",
+        "memory_write": "memory_write",
+    })
+
+    builder.add_conditional_edges("security_proxy", security_next_step, {
+        "tool_action": "tool_action",
+        "memory_write": "memory_write",
+    })
+
+    builder.add_edge("tool_action", "complex_llm")
+    builder.add_edge("simple", "memory_write")
     builder.add_edge("memory_write", END)
-    
+
     return builder
 
 # --- Init Agent Async Wrapper ---
 from langgraph.checkpoint.memory import MemorySaver  # Optimized for M4
 from src.config.settings import MCP_CONFIG_PATH, REDIS_URL
 from src.tools.mcp_client import mcp_manager
-import logging
-
-logger = logging.getLogger(__name__)
 
 async def init_agent(checkpointer=None):
     """Initializes the agent with optimized checkpointer for Mac M4."""

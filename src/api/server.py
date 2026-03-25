@@ -14,8 +14,10 @@ import json
 import asyncio
 import os
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
+from langgraph.types import Command
 
 from src.agent.graph import init_agent
+from src.agent.nodes.router import generate_chat_title_router_llm
 from src.memory.user_profile import get_profile, update_profile
 from src.memory.persona import get_persona, update_persona_field
 from src.memory.memory_manager import load_memories, save_memory, delete_memory
@@ -283,6 +285,32 @@ async def api_get_conversations(limit: int = 10):
         return {"status": "ok", "conversations": conversations}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+
+@app.post("/api/chats/generate-title")
+async def api_generate_chat_title(body: dict):
+    """
+    Generate a short chat title using the router's small LLM.
+    Input: { "message": string, "files": [{ "name": string }] } (files optional)
+    Output: { "status": "ok", "title": string }
+    """
+    try:
+        message = body.get("message", "") if isinstance(body, dict) else ""
+        files = body.get("files", []) if isinstance(body, dict) else []
+
+        file_names: list[str] = []
+        if isinstance(files, list):
+            for f in files:
+                if isinstance(f, str):
+                    file_names.append(f)
+                elif isinstance(f, dict) and f.get("name"):
+                    file_names.append(str(f.get("name")))
+
+        title = await generate_chat_title_router_llm(message, file_names=file_names)
+        return {"status": "ok", "title": title or ""}
+    except Exception as e:
+        return {"status": "error", "message": str(e), "title": ""}
+
 
 @app.get("/api/memory-context")
 async def api_get_memory_context():
@@ -679,24 +707,95 @@ async def api_update_project(project_id: str, body: dict):
     return project_manager.update_project(project_id, **body)
 
 
+def _stringify_lc_message_content(content) -> str:
+    """Flatten LangChain message content (str or list of blocks) for JSON/UI."""
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict):
+                text = block.get("text")
+                if text is not None:
+                    parts.append(str(text))
+                else:
+                    nested = block.get("content")
+                    if nested is not None:
+                        parts.append(_stringify_lc_message_content(nested))
+            else:
+                parts.append(str(block))
+        return "".join(parts)
+    return str(content)
+
+
 def serialize_message(msg):
     """
     Converts Langchain BaseMessage objects into raw UI-friendly dictionaries
     so they can be safely streamed over WebSockets to a React client.
     """
-    serialized = {"type": msg.type, "content": msg.content}
-    
+    if isinstance(msg, AIMessage):
+        content_ui = _stringify_lc_message_content(msg.content)
+    else:
+        content_ui = msg.content
+
+    serialized = {"type": msg.type, "content": content_ui}
+
     if isinstance(msg, AIMessage) and getattr(msg, "tool_calls", None):
         serialized["tool_calls"] = msg.tool_calls
-        
+
     if isinstance(msg, ToolMessage):
         serialized["tool_name"] = msg.name
         serialized["tool_call_id"] = msg.tool_call_id
         # Truncate content for UI readability/performance if too large
         if isinstance(msg.content, str) and len(msg.content) > 500:
             serialized["content"] = msg.content[:500] + "\n\n... [Content Truncated for UI] ..."
-            
+
     return serialized
+
+
+def serialize_interrupt_item(item):
+    """Convert LangGraph interrupt payload items into JSON-safe values."""
+    value = getattr(item, "value", item)
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, list):
+        return value
+    return str(value)
+
+
+def _stringify_tool_input(value) -> str | None:
+    """Convert tool args payload into a compact UI-safe string."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    try:
+        return json.dumps(value, ensure_ascii=False)
+    except Exception:
+        return str(value)
+
+
+def _tool_status_from_content(content: str) -> str:
+    """Best-effort status detection for tool outputs."""
+    if not isinstance(content, str):
+        return "success"
+    lowered = content.lower()
+    error_hints = (
+        "execution error",
+        "sandbox error",
+        "error:",
+        "traceback",
+        "exception",
+        "permission denied",
+        "command not found",
+    )
+    return "error" if any(h in lowered for h in error_hints) else "success"
 
 
 class GraphSession:
@@ -787,6 +886,8 @@ async def websocket_endpoint(websocket: WebSocket, thread_id: str):
     # Task to listen to the session events and send them to the websocket
     async def forward_events():
         q = await session.add_listener()
+        pending_tool_calls: dict[str, dict] = {}
+        running_tool_calls: dict[str, dict] = {}
         try:
             while True:
                 event = await q.get()
@@ -803,23 +904,97 @@ async def websocket_endpoint(websocket: WebSocket, thread_id: str):
                     if kind in ["on_chain_start", "on_chain_end"]:
                         print(f"[WS Debug] Event={kind} | Node={node}")
 
-                    if kind == "on_chat_model_stream" and node in ["simple", "complex", "tool_executor"]:
+                    if kind == "on_chain_start" and (node in {"tool_action", "tools"} or metadata.get("langgraph_step") == "tools"):
+                        for tool_call_id, tc in list(pending_tool_calls.items()):
+                            tool_name = str(tc.get("tool_name") or "unknown_tool")
+                            tool_input = tc.get("tool_input")
+                            started_at = asyncio.get_running_loop().time()
+                            running_tool_calls[tool_call_id] = {
+                                "tool_name": tool_name,
+                                "started_at": started_at,
+                            }
+                            await websocket.send_json(
+                                {
+                                    "type": "tool_execution",
+                                    "status": "running",
+                                    "tool_name": tool_name,
+                                    "tool_call_id": tool_call_id or None,
+                                    "input": tool_input,
+                                }
+                            )
+                        pending_tool_calls.clear()
+
+                    elif kind == "on_chain_stream":
+                        chunk = event.get("data", {}).get("chunk")
+                        if isinstance(chunk, dict) and "__interrupt__" in chunk:
+                            interrupts = [serialize_interrupt_item(i) for i in chunk.get("__interrupt__", [])]
+                            pending_tool_calls.clear()
+                            await websocket.send_json({"type": "interrupt", "interrupts": interrupts})
+
+                    elif kind == "on_chat_model_stream" and node in ["simple", "complex_llm"]:
                         chunk = event["data"]["chunk"]
                         if chunk.content:
                             await websocket.send_json({"type": "chunk", "content": chunk.content})
                         
                     elif kind == "on_chain_end":
-                        if node in ["simple", "complex", "tool_executor"]:
-                            output = event["data"]["output"]
+                        output = event["data"].get("output")
+                        if isinstance(output, dict) and "__interrupt__" in output:
+                            interrupts = [serialize_interrupt_item(i) for i in output.get("__interrupt__", [])]
+                            await websocket.send_json({"type": "interrupt", "interrupts": interrupts})
+
+                        if node in ["simple", "complex_llm"]:
                             if isinstance(output, dict) and "messages" in output:
-                                msg = output["messages"][0]
-                                if getattr(msg, "tool_calls", None):
+                                messages = output.get("messages") or []
+                                if not messages:
+                                    continue
+                                msg = messages[0]
+                                tc_list = list(getattr(msg, "tool_calls", None) or [])
+                                text_for_ui = (
+                                    _stringify_lc_message_content(msg.content).strip()
+                                    if isinstance(msg, AIMessage)
+                                    else str(getattr(msg, "content", "") or "").strip()
+                                )
+                                if tc_list:
+                                    # Include reasoning / pre-tool text in the same payload (serialize_message flattens content).
+                                    aw_msg = serialize_message(msg)
+                                    await websocket.send_json({"type": "message", "message": aw_msg})
+                                    for tc in tc_list:
+                                        tool_call_id = str(tc.get("id") or tc.get("tool_call_id") or f"pending-{len(pending_tool_calls)+1}")
+                                        tool_name = str(tc.get("name") or "unknown_tool")
+                                        tool_input = _stringify_tool_input(tc.get("args"))
+                                        pending_tool_calls[tool_call_id] = {
+                                            "tool_name": tool_name,
+                                            "tool_input": tool_input,
+                                        }
+                                if text_for_ui and not tc_list:
+                                    # Final assistant text after tools (or non-streaming turns). Without this,
+                                    # the UI only saw chunks; if streaming missed events, the answer was blank.
                                     await websocket.send_json({"type": "message", "message": serialize_message(msg)})
-                        elif node == "tools" or metadata.get("langgraph_step") == "tools":
-                            output = event["data"]["output"]
+                        elif node in {"tool_action", "tools"} or metadata.get("langgraph_step") == "tools":
                             if isinstance(output, dict) and "messages" in output:
                                 for msg in output["messages"]:
                                     await websocket.send_json({"type": "message", "message": serialize_message(msg)})
+                                    if isinstance(msg, ToolMessage):
+                                        tool_call_id = str(getattr(msg, "tool_call_id", "") or "")
+                                        stored = running_tool_calls.pop(tool_call_id, None) if tool_call_id else None
+                                        tool_name = str(getattr(msg, "name", "") or (stored or {}).get("tool_name") or "unknown_tool")
+                                        started_at = (stored or {}).get("started_at")
+                                        duration = None
+                                        if started_at is not None:
+                                            duration = max(0.0, asyncio.get_running_loop().time() - float(started_at))
+                                        content = str(getattr(msg, "content", "") or "")
+                                        status = _tool_status_from_content(content)
+                                        await websocket.send_json(
+                                            {
+                                                "type": "tool_execution",
+                                                "status": status,
+                                                "tool_name": tool_name,
+                                                "tool_call_id": tool_call_id or None,
+                                                "output": content if status == "success" else None,
+                                                "error": content if status == "error" else None,
+                                                "duration": duration,
+                                            }
+                                        )
                 else:
                     # Our custom events (status, error, etc)
                     print(f"[WS Debug] Custom Event: {event}")
@@ -862,6 +1037,14 @@ async def websocket_endpoint(websocket: WebSocket, thread_id: str):
                     if session.task and not session.task.done():
                         session.task.cancel()
                         session.is_running = False
+                continue
+
+            if payload.get("type") == "security_approval":
+                approved = bool(payload.get("approved"))
+                await session.start_run(
+                    Command(resume={"approved": approved}),
+                    config=config
+                )
                 continue
 
             user_input = payload.get("message", "")

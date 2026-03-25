@@ -49,7 +49,7 @@ async def analyze_memory_node(state: AgentState):
 
     # We need an LLM to extract facts.
     from src.agent.llm import get_small_llm
-    llm = get_small_llm()
+    llm = await get_small_llm()
 
     prompt = f"""
 Analyze the conversation below and extract any NEW important facts about the user, their preferences, 
@@ -96,7 +96,7 @@ config = {
         "config": {
             "host": "localhost",
             "port": 8000,
-            "collection_name": "cowork_memory"
+            "collection_name": "cowork_memory_mE5",
         }
     },
     # We will use our local Qwen2.5 via langchain proxy or an OpenAI-compatible endpoint 
@@ -105,7 +105,7 @@ config = {
     "embedder": {
         "provider": "huggingface",
         "config": {
-            "model": "BAAI/bge-small-en-v1.5"
+            "model": "intfloat/multilingual-e5-small",
         }
     }
 }

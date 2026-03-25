@@ -14,15 +14,16 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Streamlined router prompt for faster decisions on M4
-ROUTER_PROMPT = """You are a routing expert. Analyze this message and decide:
-- "simple": Short greetings, thanks, bye, or trivial chat that does NOT need live web data or multi-step work
-- "complex": Reasoning, coding, writing, math, OR any question needing current events, weather, prices, news, or a web lookup
+# Router: minimal tokens; reasoning-style small models get a hard "no deliberation" instruction.
+ROUTER_PROMPT = """Classify in one shot. No reasoning, no preamble, no markdown.
 
-Output ONLY this JSON format:
-{{"routing": "simple" OR "complex", "confidence": 0.0-1.0}}
+simple = greetings/thanks/small talk OR a direct question answerable without tools or heavy reasoning.
+complex = code/math/writing, multi-step work, OR needs live web/news/weather/prices.
 
-Message: "{user_input}"
+Reply with exactly one JSON object (nothing else):
+{{"routing":"simple"|"complex","confidence":0.0-1.0}}
+
+Message: {user_input}
 
 JSON:"""
 
@@ -124,10 +125,11 @@ async def router_node(state: AgentState) -> AgentState:
 
     try:
         # LM Studio Qwen templates expect a **user** message; system-only breaks Jinja.
-        response = await small_llm.ainvoke(
+        router_llm = small_llm.bind(temperature=0.05, max_tokens=96)
+        response = await router_llm.ainvoke(
             [
                 HumanMessage(
-                    content=ROUTER_PROMPT.format(user_input=user_text[:500])
+                    content=ROUTER_PROMPT.format(user_input=json.dumps(user_text[:500]))
                 ),
             ]
         )
@@ -138,3 +140,66 @@ async def router_node(state: AgentState) -> AgentState:
 
     logger.info(f"[router] → {decision}")
     return {"route": decision}
+
+
+CHAT_TITLE_PROMPT = """You are a helpful assistant that proposes a short chat title.
+
+Rules:
+- Output ONLY valid JSON (no markdown, no extra keys).
+- Title must be concise and human-friendly.
+- Prefer the main intent/topic from the user's message.
+
+JSON format:
+{{"title":"..."}}
+
+User message: {user_input}
+Attached file names: {file_names}
+"""
+
+
+def _parse_title_json(content: str) -> str:
+    """
+    Best-effort extraction of `{"title":"..."}` from model output.
+    Returns empty string if parsing fails.
+    """
+    try:
+        match = re.search(r"\{.*\}", content, re.DOTALL)
+        if not match:
+            return ""
+        parsed = json.loads(match.group(0))
+        title = str(parsed.get("title", "")).strip()
+        return title
+    except Exception:
+        return ""
+
+
+async def generate_chat_title_router_llm(
+    user_text: str,
+    file_names: list[str] | None = None,
+) -> str:
+    """
+    Generate a chat title using the router's small LLM.
+
+    This is intentionally lightweight: we only ask for a single JSON title object.
+    """
+    user_text = str(user_text or "").strip()
+    if not user_text:
+        return ""
+
+    file_names = file_names or []
+    joined_files = ", ".join([str(n).strip() for n in file_names if n])
+    joined_files = joined_files[:400]  # avoid massive prompts
+
+    small_llm = await get_small_llm()
+
+    router_llm = small_llm.bind(temperature=0.2, max_tokens=64)
+    response = await router_llm.ainvoke(
+        [HumanMessage(content=CHAT_TITLE_PROMPT.format(user_input=user_text[:1000], file_names=joined_files))]
+    )
+
+    title = _parse_title_json(getattr(response, "content", "") or "")
+    # Normalize / truncate to keep UI clean (frontend also truncates as fallback).
+    title = re.sub(r"\s+", " ", title).strip()
+    if not title:
+        return ""
+    return title[:60]

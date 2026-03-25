@@ -15,7 +15,7 @@ HOST = "0.0.0.0"
 PORT = 8000
 
 # Agent Settings
-DEFAULT_MODEL = "mlx-community/Qwen2-VL-7B-Instruct-4bit"
+DEFAULT_MODEL = "qwen/qwen3.5-9b"
 DEFAULT_LLM_URL = "http://127.0.0.1:8080/v1"
 
 # External Services
@@ -25,6 +25,35 @@ CHROMADB_PORT = int(os.getenv("CHROMADB_PORT", 8000))
 
 # MCP Settings
 MCP_CONFIG_PATH = PROJECT_ROOT / "mcp_config.json"
+
+# Web RAG (fetch_webpage excerpt ranking; optional web_search snippet rerank)
+WEB_RAG_ENABLED = os.getenv("WEB_RAG_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+WEB_RAG_EMBED_MODEL = os.getenv("WEB_RAG_EMBED_MODEL", "all-MiniLM-L6-v2")
+WEB_RAG_TOP_K = int(os.getenv("WEB_RAG_TOP_K", "5"))
+WEB_RAG_CHUNK_CHARS = int(os.getenv("WEB_RAG_CHUNK_CHARS", "720"))
+WEB_RAG_CHUNK_OVERLAP = int(os.getenv("WEB_RAG_CHUNK_OVERLAP", "120"))
+# Run embedding rank when plain text is at least this many characters
+WEB_RAG_MIN_CHARS_FOR_RANK = int(os.getenv("WEB_RAG_MIN_CHARS_FOR_RANK", "1800"))
+WEB_SEARCH_RERANK_TOP_N = int(os.getenv("WEB_SEARCH_RERANK_TOP_N", "8"))
+
+# Web search reliability controls
+# Provider routing: auto | brave | serper | tavily | none
+WEB_SEARCH_PROVIDER = (os.getenv("WEB_SEARCH_PROVIDER", "auto") or "auto").strip().lower()
+WEB_SEARCH_TIMEOUT_SECONDS = float(os.getenv("WEB_SEARCH_TIMEOUT_SECONDS", "22"))
+WEB_SEARCH_ENABLE_CURL_CFFI = os.getenv("WEB_SEARCH_ENABLE_CURL_CFFI", "true").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+WEB_SEARCH_ENABLE_BROWSER_FALLBACK = os.getenv(
+    "WEB_SEARCH_ENABLE_BROWSER_FALLBACK", "true"
+).strip().lower() in {"1", "true", "yes", "on"}
+
+# Tier-1 provider keys (optional)
+BRAVE_SEARCH_API_KEY = (os.getenv("BRAVE_SEARCH_API_KEY", "") or "").strip()
+SERPER_API_KEY = (os.getenv("SERPER_API_KEY", "") or "").strip()
+TAVILY_API_KEY = (os.getenv("TAVILY_API_KEY", "") or "").strip()
 
 # ─── M4 MAC AIR OPTIMIZATION ───────────────────────────────────────────────
 # These settings are optimized for Mac M4 Air with small-large model architecture

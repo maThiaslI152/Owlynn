@@ -3,10 +3,22 @@ from src.agent.state import AgentState
 from src.agent.llm import get_large_llm_with_tools
 from src.agent.lm_studio_compat import with_system_for_local_server
 from langgraph.prebuilt import ToolNode
-from src.tools import web_search, execute_python_code, read_workspace_file, recall_memories
+from src.tools import (
+    web_search,
+    fetch_webpage,
+    execute_python_code,
+    read_workspace_file,
+    recall_memories,
+)
 
 # Define tools for ToolNode (must match to bound tools)
-TOOLS = [web_search, execute_python_code, read_workspace_file, recall_memories]
+TOOLS = [
+    web_search,
+    fetch_webpage,
+    execute_python_code,
+    read_workspace_file,
+    recall_memories,
+]
 tool_node = ToolNode(TOOLS)
 
 EXECUTOR_PROMPT = """You are a reasoning agent. The tool to use has already been selected: {tool_name}.

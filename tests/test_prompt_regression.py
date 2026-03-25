@@ -31,6 +31,7 @@ async def test_prompt_regression_small_route():
     app = build_graph().compile()
 
     mock_simple_llm = AsyncMock()
+    mock_simple_llm.bind = MagicMock(return_value=mock_simple_llm)
     mock_simple_llm.ainvoke.return_value = AIMessage(content="SMALL_OK")
 
     with patch("src.agent.nodes.simple.get_small_llm", AsyncMock(return_value=mock_simple_llm)), \
@@ -61,6 +62,7 @@ async def test_prompt_regression_complex_route():
     app = build_graph().compile()
 
     mock_router_llm = AsyncMock()
+    mock_router_llm.bind = MagicMock(return_value=mock_router_llm)
     mock_router_llm.ainvoke.return_value = AIMessage(content='{"routing": "complex", "confidence": 0.99}')
 
     mock_bound = AsyncMock()

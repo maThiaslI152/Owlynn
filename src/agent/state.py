@@ -64,5 +64,9 @@ class AgentState(TypedDict):
     model_used: str | None         # 'small' or 'large'
     memory_context: str | None     # Formatted context string
     persona: str | None            # Persona summary string
+    pending_tool_calls: bool | None
+    pending_tool_names: Annotated[list[str], operator.add]
+    security_decision: str | None  # 'approved' | 'denied'
+    security_reason: str | None
 
 

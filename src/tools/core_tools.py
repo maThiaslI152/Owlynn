@@ -171,9 +171,13 @@ def execute_python_code(code: str) -> str:
     """
     Executes a block of Python code directly inside the sandbox container.
     Use this for running Python scripts instead of `execute_sandboxed_shell`.
-    
+
     Pre-installed libraries include: matplotlib, pandas, numpy, scipy, seaborn.
     Any files saved by your script will appear in the workspace folder.
+
+    The environment is non-interactive: stdin is not connected. Do NOT use input(),
+    getpass, or any code that waits for keyboard input — it will raise EOFError.
+    Use literal values, variables, or argparse with defaults for demos instead.
     """
     import uuid
     filename = f".temp_{uuid.uuid4().hex[:8]}.py"

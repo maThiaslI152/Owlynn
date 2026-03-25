@@ -1,59 +1,14 @@
+"""Graph compilation smoke test (legacy filename for small/large routing era)."""
+
 import sys
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import MagicMock
 
-# Mock mem0 BEFORE importing src to avoid Chroma connection on module load
-sys.modules['mem0'] = MagicMock()
+sys.modules["mem0"] = MagicMock()
 
-import pytest
+from langgraph.checkpoint.memory import MemorySaver
 
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
-from src.agent.graph import build_graph, small_llm_node, simple_response_node, large_llm_node
-from src.agent.state import AgentState
+from src.agent.graph import build_graph
 
-@pytest.mark.anyio
-async def test_small_llm_node_simple():
-    # Mock Small LLM to return SIMPLE
-    mock_llm = AsyncMock()
-    mock_llm.ainvoke.return_value = AIMessage(content='{"routing": "SIMPLE", "reason": "Just greeting"}')
-    
-    state: AgentState = {
-        "messages": [HumanMessage(content="Hello")],
-        "routing_decision": None,
-        "current_task": None
-    }
-    
-    with patch('src.agent.graph.get_small_llm', return_value=mock_llm):
-        result = await small_llm_node(state)
-        
-    assert result["routing_decision"] == "SIMPLE"
 
-@pytest.mark.anyio
-async def test_small_llm_node_tool():
-    # Mock Small LLM to return TOOL
-    mock_llm = AsyncMock()
-    # Simplified JSON response format without tool_args
-    mock_llm.ainvoke.return_value = AIMessage(content='{"routing": "TOOL", "reason": "Need list", "confidence": 0.9}')
-    
-    state: AgentState = {
-        "messages": [HumanMessage(content="list files")],
-        "routing_decision": None,
-        "current_task": None
-    }
-    
-    with patch('src.agent.graph.get_small_llm', return_value=mock_llm):
-        result = await small_llm_node(state)
-        
-    assert result["routing_decision"] == "TOOL"
-    # Suggestion #1 & #2: Messages are no longer appended here for tool calls
-    assert "messages" not in result
-
-def test_graph_compilation():
-    # Verify the graph compiles without errors
-    try:
-        graph = build_graph([])
-        assert graph is not None
-        # Try to compile with a checkpointer mock if needed, or just build_graph
-        compiled = graph.compile()
-        assert compiled is not None
-    except Exception as e:
-        pytest.fail(f"Graph compilation failed: {e}")
+def test_graph_compile_with_checkpointer():
+    assert build_graph().compile(checkpointer=MemorySaver()) is not None

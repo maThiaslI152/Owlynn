@@ -9,11 +9,12 @@ import tempfile
 import shutil
 from pathlib import Path
 
-# Add src to path
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
-from api.file_processor import FileWatcherHandler
+# Project root on path (see pytest.ini pythonpath)
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+from src.api.file_processor import FileWatcherHandler
 
 
 def create_test_file(temp_dir, filename, content):

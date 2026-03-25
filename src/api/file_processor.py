@@ -186,7 +186,7 @@ class FileWatcherHandler(FileSystemEventHandler):
             
             # Pretty print XML
             dom = minidom.parseString(xml_str)
-            pretty_xml = dom.toprettyxml(indent=2)
+            pretty_xml = dom.toprettyxml(indent="  ")
             
             with open(output_path, 'w', encoding='utf-8') as f:
                 f.write("# XML File\n\n```xml\n" + pretty_xml + "\n```")

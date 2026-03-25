@@ -18,7 +18,8 @@ The current LangGraph graph (`src/agent/graph.py`) routes only to:
 Concretely, the large model receives:
 
 - With web:
-  - `web_search`
+  - `web_search` (optional `focus_query` for snippet reranking)
+  - `fetch_webpage` (optional `focus_query` for excerpt ranking on long pages; SSRF-safe URLs only)
   - `execute_python_code`
   - `read_workspace_file`
   - `recall_memories`
@@ -39,10 +40,9 @@ The repo contains additional tool implementations beyond the small set above, fo
   - `write_workspace_file`, `edit_workspace_file`, `delete_workspace_file`, etc.
 - Lightpanda browser automation tools (optional dependency):
   - `lightpanda_fetch_page`, `lightpanda_execute_js`, `lightpanda_screenshot`, ...
-- static web fetch:
-  - `fetch_webpage`
+- optional Lightpanda browser automation tools (see below)
 
-However, these tools are not currently part of the large model tool lists in `src/agent/tool_sets.py`, so they are not available to the active `complex` node unless you wire them in.
+`fetch_webpage` is now part of `COMPLEX_TOOLS_WITH_WEB` (wired in `tool_sets.py`). Other fetch/edit/sandbox tools may still be MCP-only or legacy unless listed in `tool_sets.py`.
 
 ## 3) Adding a new tool (the safe path)
 

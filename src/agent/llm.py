@@ -27,28 +27,28 @@ class LLMPool:
                     if cls._small_llm is None:
                         profile = get_profile()
                         base_url = profile.get("small_llm_base_url", "http://127.0.0.1:1234/v1")
-                        model = profile.get("small_llm_model_name", "nvidia/nemotron-3-nano-4b")
+                        model = profile.get("small_llm_model_name", "jackrong-qwen3.5-2b-claude-reasoning-abliterated-mxfp8-mlx")
                         
                         cls._small_llm = ChatOpenAI(
                             model=model,
                             api_key="sk-local-no-key-needed",
                             base_url=base_url,
-                            temperature=0.3,  # Lower for routing accuracy
-                            max_tokens=1024,  # Optimized for M4 (routing doesn't need 2048)
-                            extra_body={"max_output_tokens": 1024}
+                            temperature=0.2,
+                            max_tokens=512,
+                            extra_body={"max_output_tokens": 512},
                         )
             except Exception:
                 # Fallback: create non-pooled instance
                 profile = get_profile()
                 base_url = profile.get("small_llm_base_url", "http://127.0.0.1:1234/v1")
-                model = profile.get("small_llm_model_name", "nvidia/nemotron-3-nano-4b")
+                model = profile.get("small_llm_model_name", "jackrong-qwen3.5-2b-claude-reasoning-abliterated-mxfp8-mlx")
                 return ChatOpenAI(
                     model=model,
                     api_key="sk-local-no-key-needed",
                     base_url=base_url,
-                    temperature=0.3,
-                    max_tokens=1024,
-                    extra_body={"max_output_tokens": 1024}
+                    temperature=0.2,
+                    max_tokens=512,
+                    extra_body={"max_output_tokens": 512},
                 )
         return cls._small_llm
     
@@ -129,9 +129,21 @@ async def initialize_llm_pool():
     return small_llm, large_llm
 
 # --- TOOL BINDING FOR LARGE LLM ---
-from src.tools import web_search, execute_python_code, read_workspace_file, recall_memories
+from src.tools import (
+    web_search,
+    fetch_webpage,
+    execute_python_code,
+    read_workspace_file,
+    recall_memories,
+)
 
-TOOLS = [web_search, execute_python_code, read_workspace_file, recall_memories]
+TOOLS = [
+    web_search,
+    fetch_webpage,
+    execute_python_code,
+    read_workspace_file,
+    recall_memories,
+]
 async def get_large_llm_with_tools():
     """Returns the large LLM with tools bound."""
     llm = await LLMPool.get_large_llm()

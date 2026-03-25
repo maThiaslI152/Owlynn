@@ -4,6 +4,11 @@ let socket = null;
 let isReasoning = false;
 let pendingFiles = []; // { name, type, data (base64), preview? }
 let currentSubPath = ''; // Tracks current folder level in workspace view
+let hasSentMessageInCurrentSession = false; // Draft tracking for "New chat" UX
+let chatRegisteredInBackend = false; // Whether this thread is registered in the project recents list
+let chatProjectIdForThread = 'default'; // Project context used for agent calls + chat registration
+let titleGenerationInFlight = false; // Prevent duplicate title generations
+let websocketThreadId = null; // Track which thread the websocket is bound to
 let activeMode = 'tools_on'; // 'tools_on' = local tools + optional web (see webSearchEnabled)
 /** When false, backend omits web_search from the tool list (other tools stay on). */
 let webSearchEnabled = true;
@@ -15,6 +20,9 @@ let currentChatName = '';
 let activeAiMessage = null; 
 let lastHumanMessage = ""; // For regenerate
 let currentModelUsed = "unknown"; // Track which model is being used
+let thinkingIndicatorEl = null;
+let activeToolName = null;
+const liveToolCards = new Map();
 let currentView = 'welcome';
 let cachedProjects = [];
 let cachedArtifacts = [];
@@ -47,7 +55,14 @@ function renderToolExecution(toolName, status = 'running', input = null, output 
     
     let outputHtml = '';
     if (output) {
-        outputHtml = `<div class="tool-output"><strong>Output:</strong><div class="mt-1 text-gray-700">${DOMPurify.sanitize(output)}</div></div>`;
+        const raw = String(output);
+        const longOut = raw.length > 600;
+        const safe = DOMPurify.sanitize(raw);
+        if (longOut) {
+            outputHtml = `<details class="tool-output-details mt-2 border-t border-bordercolor pt-2"><summary class="cursor-pointer text-xs font-semibold text-gray-600 hover:text-gray-900">Raw tool output (${raw.length} chars) — click to expand</summary><div class="tool-output mt-2 max-h-[min(50vh,420px)] overflow-y-auto text-gray-700 text-sm whitespace-pre-wrap break-words">${safe}</div></details>`;
+        } else {
+            outputHtml = `<div class="tool-output"><strong>Output:</strong><div class="mt-1 text-gray-700">${safe}</div></div>`;
+        }
     }
     
     let errorHtml = '';
@@ -58,7 +73,7 @@ function renderToolExecution(toolName, status = 'running', input = null, output 
     card.innerHTML = `
         <div class="tool-header">
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 1 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
-            <span>${toolName}</span>
+            <span>${DOMPurify.sanitize(String(toolName || 'tool'))}</span>
             ${statusBadge}
         </div>
         ${inputHtml}
@@ -95,12 +110,71 @@ function renderLoadingSkeleton() {
     return div;
 }
 
+function formatToolLabel(name) {
+    if (!name) return "";
+    return String(name).replace(/_/g, ' ');
+}
+
+function showThinkingIndicator() {
+    if (thinkingIndicatorEl) return;
+    const wrapper = document.createElement('div');
+    wrapper.className = 'flex gap-4 group-msg mb-6';
+    wrapper.dataset.sender = 'agent-thinking';
+
+    const avatar = document.createElement('div');
+    avatar.className = 'w-8 h-8 rounded shrink-0 bg-anthropic flex items-center justify-center text-white mt-1';
+    avatar.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8V4H8"/><rect x="4" y="8" width="16" height="12" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>';
+    wrapper.appendChild(avatar);
+
+    const content = document.createElement('div');
+    content.className = 'flex-1 message-content text-base text-textdark';
+    content.innerHTML = `
+        <div class="thinking-pill">
+            <span class="thinking-dot"></span>
+            <span id="thinkingText">Owlynn is thinking...</span>
+        </div>
+    `;
+    wrapper.appendChild(content);
+    messagesArea.appendChild(wrapper);
+    thinkingIndicatorEl = wrapper;
+    scrollToBottom();
+}
+
+function updateThinkingIndicatorText() {
+    if (!thinkingIndicatorEl) return;
+    const textEl = thinkingIndicatorEl.querySelector('#thinkingText');
+    if (!textEl) return;
+    textEl.textContent = activeToolName
+        ? `Running tool: ${formatToolLabel(activeToolName)}`
+        : 'Owlynn is thinking...';
+}
+
+function clearThinkingIndicator() {
+    if (!thinkingIndicatorEl) return;
+    thinkingIndicatorEl.remove();
+    thinkingIndicatorEl = null;
+}
+
+function resetTransientExecutionUI() {
+    clearThinkingIndicator();
+    activeToolName = null;
+    liveToolCards.clear();
+}
+
+/** Keep streaming / final answer bubble after tool cards (tool_execution appends in between). */
+function moveActiveAnswerToEnd() {
+    if (!activeAiMessage?.mainContainer || !activeAiMessage?.contentDiv) return;
+    activeAiMessage.mainContainer.classList.add('agent-final-answer');
+    activeAiMessage.contentDiv.appendChild(activeAiMessage.mainContainer);
+}
+
 // DOM Elements
 const chatContainer = document.getElementById('chatContainer');
 const messagesArea = document.getElementById('messagesArea');
 const chatForm = document.getElementById('chatForm');
 const messageInput = document.getElementById('messageInput');
 const sendBtn = document.getElementById('sendBtn');
+const welcomePane = document.getElementById('view-welcome');
 const sessionIdEl = document.getElementById('sessionId');
 const newChatBtn = document.getElementById('newChatBtn');
 const statusDot = document.getElementById('connectionStatusDot');
@@ -109,6 +183,7 @@ const mobileDot = document.getElementById('mobileConnectionDot');
 const agentStatus = document.getElementById('agentStatus');
 const dragOverlay = document.getElementById('dragOverlay');
 const attachmentPreviews = document.getElementById('attachmentPreviews');
+const welcomeAttachmentPreviews = document.getElementById('welcomeAttachmentPreviews');
 const fileInput = document.getElementById('fileInput');
 const attachBtn = document.getElementById('attachBtn'); // legacy; may be null (composer + menu)
 const modeFastBtn = document.getElementById('modeFastBtn');
@@ -181,7 +256,7 @@ async function loadSettingsData() {
         if (profileLangInput) profileLangInput.value = profile.preferred_language || 'en';
         if (profileStyleInput) profileStyleInput.value = profile.response_style || 'detailed';
         if (profileLlmUrlInput) profileLlmUrlInput.value = profile.llm_base_url || 'http://127.0.0.1:8080/v1';
-        if (profileLlmModelInput) profileLlmModelInput.value = profile.llm_model_name || 'mlx-community/Qwen2-VL-7B-Instruct-4bit';
+        if (profileLlmModelInput) profileLlmModelInput.value = profile.llm_model_name || 'qwen/qwen3.5-9b';
 
         updateComposerStyleQuickLabel();
 
@@ -263,7 +338,7 @@ function buildChatWsPayload(messageText, filesPayload) {
         mode: activeMode,
         web_search_enabled: webSearchEnabled,
         response_style: responseStyle,
-        project_id: getEffectiveProjectId(),
+        project_id: getChatProjectId(),
     };
 }
 
@@ -679,11 +754,13 @@ async function switchProject(projectId, resetChat = true) {
             // Load project-specific session ID
             const savedSessionId = localStorage.getItem(`project_session_${projectId}`);
             if (savedSessionId) {
+                chatProjectIdForThread = projectId;
                 currentSessionId = savedSessionId;
                 if (sessionIdEl) sessionIdEl.value = currentSessionId;
                 await loadChatHistory(currentSessionId);
                 const selectedChat = (project.chats || []).find((c) => c.id === currentSessionId);
                 currentChatName = selectedChat?.name || '';
+                chatRegisteredInBackend = Boolean(selectedChat);
                 
                 // Reconnect WebSocket to the correct thread
                 if (socket) {
@@ -704,10 +781,12 @@ async function switchProject(projectId, resetChat = true) {
 async function loadChatHistory(sessionId) {
     messagesArea.innerHTML = '';
     activeAiMessage = null;
+    resetTransientExecutionUI();
     
     try {
         const res = await fetch(`http://127.0.0.1:8000/api/history/${sessionId}`);
         const history = await res.json();
+        hasSentMessageInCurrentSession = history && history.length > 0;
         
         if (history.length === 0) {
             renderMessage({ type: 'ai', content: 'Chat started. How can I help you today?' });
@@ -722,6 +801,7 @@ async function loadChatHistory(sessionId) {
         messagesArea.scrollTop = messagesArea.scrollHeight;
     } catch (e) {
         console.error('Failed to load history:', e);
+        hasSentMessageInCurrentSession = false;
         renderMessage({ type: 'ai', content: 'Chat started. How can I help you today?' });
     }
 }
@@ -787,6 +867,7 @@ function renderProjectChats(chats) {
 }
 
 async function switchChat(sessionId) {
+    resetTransientExecutionUI();
     currentSessionId = sessionId;
     if (sessionIdEl) sessionIdEl.value = currentSessionId;
     switchView('chat');
@@ -810,6 +891,8 @@ async function switchChat(sessionId) {
     // Refresh project details to update active chat highlighting
     const res = await fetch(`http://127.0.0.1:8000/api/projects/${getEffectiveProjectId()}`);
     const project = await res.json();
+    chatProjectIdForThread = getEffectiveProjectId();
+    chatRegisteredInBackend = Boolean((project.chats || []).find((c) => c.id === sessionId));
     renderProjectChats(project.chats || []);
     currentChatName = (project.chats || []).find((c) => c.id === sessionId)?.name || '';
     renderWelcomeRecents();
@@ -849,30 +932,91 @@ async function deleteChat(chatId, chatName) {
     }
 }
 
-async function maybeAutoNameCurrentChat(userText) {
-    if (!hasSelectedProject || !activeProjectId) return;
+async function maybeAutoNameCurrentChat(userText, fileNames = []) {
     if (!userText || !userText.trim()) return;
     if (!isUntitledName(currentChatName)) return;
+    if (titleGenerationInFlight) return;
 
-    const nextName = deriveChatTitle(userText);
-    if (!nextName) return;
+    titleGenerationInFlight = true;
 
     try {
-        await fetch(`http://127.0.0.1:8000/api/projects/${activeProjectId}/chats/${currentSessionId}`, {
+        await ensureChatRegistered();
+
+        const projectId = getChatProjectId();
+        const payloadFiles = (fileNames || []).map((n) => ({ name: n }));
+
+        const res = await fetch('http://127.0.0.1:8000/api/chats/generate-title', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                message: userText,
+                files: payloadFiles
+            })
+        });
+
+        const data = await res.json();
+        const suggested = data?.title ? String(data.title).trim() : '';
+        const nextName = suggested || deriveChatTitle(userText);
+
+        const finalName = nextName ? String(nextName).replace(/\s+/g, ' ').trim().slice(0, 60) : '';
+        if (!finalName) return;
+
+        await fetch(`http://127.0.0.1:8000/api/projects/${projectId}/chats/${currentSessionId}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: nextName })
+            body: JSON.stringify({ name: finalName })
         });
-        currentChatName = nextName;
 
-        const res = await fetch(`http://127.0.0.1:8000/api/projects/${activeProjectId}`);
-        const project = await res.json();
-        renderProjectChats(project.chats || []);
-        renderProjectInspector(project);
-        cachedProjects = cachedProjects.map((p) => (p.id === activeProjectId ? project : p));
+        currentChatName = finalName;
+
+        // Refresh project data so recents reflect the new chat title.
+        const projectRes = await fetch(`http://127.0.0.1:8000/api/projects/${projectId}`);
+        const project = await projectRes.json();
+        cachedProjects = cachedProjects.map((p) => (p.id === projectId ? project : p));
+
+        const sidebarProjectId = getEffectiveProjectId();
+        if (sidebarProjectId === projectId) {
+            renderProjectChats(project.chats || []);
+            renderProjectInspector(project);
+        }
         renderWelcomeRecents();
+
+        if (currentView === 'chats' && sidebarProjectId === projectId) {
+            await loadChatsList();
+        }
     } catch (e) {
-        console.error('Failed to auto-name chat:', e);
+        console.error('Failed to generate auto-title via router LLM:', e);
+        // Best-effort fallback: local heuristic rename
+        try {
+            const fallbackName = deriveChatTitle(userText);
+            if (!fallbackName) return;
+            const projectId = getChatProjectId();
+            await fetch(`http://127.0.0.1:8000/api/projects/${projectId}/chats/${currentSessionId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: fallbackName })
+            });
+            currentChatName = fallbackName;
+            // Refresh cached project data so all recents surfaces show the title.
+            const projectRes = await fetch(`http://127.0.0.1:8000/api/projects/${projectId}`);
+            const project = await projectRes.json();
+            cachedProjects = cachedProjects.map((p) => (p.id === projectId ? project : p));
+
+            const sidebarProjectId = getEffectiveProjectId();
+            if (sidebarProjectId === projectId) {
+                renderProjectChats(project.chats || []);
+                renderProjectInspector(project);
+            }
+            renderWelcomeRecents();
+
+            if (currentView === 'chats' && sidebarProjectId === projectId) {
+                await loadChatsList();
+            }
+        } catch (_) {
+            // ignore fallback failures
+        }
+    } finally {
+        titleGenerationInFlight = false;
     }
 }
 
@@ -1213,46 +1357,52 @@ messageInput.addEventListener('input', function() {
 newChatBtn.addEventListener('click', async () => {
     // Reset reasoning state
     updateAgentStatus('idle');
-    
-    currentSessionId = generateUUID();
-    currentChatName = 'Untitled';
-    if (sessionIdEl) sessionIdEl.value = currentSessionId;
+
+    const keepCurrentDraft =
+        !hasSentMessageInCurrentSession &&
+        isUntitledName(currentChatName) &&
+        currentSessionId && socket;
+
+    if (!keepCurrentDraft) {
+        currentSessionId = generateUUID();
+        currentChatName = 'Untitled';
+        hasSentMessageInCurrentSession = false;
+        chatRegisteredInBackend = false;
+        titleGenerationInFlight = false;
+        // "General" chats start unassigned (default project) until you explicitly switch/attach.
+        chatProjectIdForThread = currentView === 'welcome' ? 'default' : getEffectiveProjectId();
+        if (sessionIdEl) sessionIdEl.value = currentSessionId;
+    }
+
     messagesArea.innerHTML = '';
+    resetTransientExecutionUI();
     pendingFiles = [];
     renderPreviews();
     
     // Start as untitled/floating chat. It can be auto-renamed from the first user message.
     const chatName = 'Untitled';
     
-    // Save mapping to localStorage
-    if (hasSelectedProject && activeProjectId) {
-        localStorage.setItem(`project_session_${activeProjectId}`, currentSessionId);
-        
-        // Register chat with project in backend
-        try {
-            await fetch(`http://127.0.0.1:8000/api/projects/${activeProjectId}/chats`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id: currentSessionId, name: chatName })
-            });
-            
-            // Refresh project details to show new chat in list
-            const res = await fetch(`http://127.0.0.1:8000/api/projects/${activeProjectId}`);
-            const project = await res.json();
-            if (projectChatsSection) projectChatsSection.classList.remove('hidden');
-            renderProjectChats(project.chats || []);
-            cachedProjects = cachedProjects.map((p) => (p.id === activeProjectId ? project : p));
-            renderWelcomeRecents();
-        } catch (e) {
-            console.error('Failed to register chat with project:', e);
+    // Save mapping to localStorage (draft sessions too, so switching projects can restore them)
+    if (chatProjectIdForThread) {
+        localStorage.setItem(`project_session_${chatProjectIdForThread}`, currentSessionId);
+    }
+
+    if (!keepCurrentDraft) {
+        if (socket) {
+            socket.onclose = null; // Prevent auto-reconnect
+            socket.close();
+        }
+        connectWebSocket();
+    } else {
+        // Make sure the websocket is connected to the draft thread.
+        if (!socket || socket.readyState !== WebSocket.OPEN || websocketThreadId !== currentSessionId) {
+            if (socket) {
+                socket.onclose = null;
+                socket.close();
+            }
+            connectWebSocket();
         }
     }
-    
-    if (socket) {
-        socket.onclose = null; // Prevent auto-reconnect
-        socket.close();
-    }
-    connectWebSocket();
     switchView('welcome');
     setWorkspaceVisibility();
 });
@@ -1306,7 +1456,7 @@ chatContainer.addEventListener('dragleave', (e) => {
     }
 });
 
-dragOverlay.addEventListener('drop', (e) => {
+function handleAttachmentDrop(e) {
     e.preventDefault();
     dragOverlay.classList.add('hidden');
     dragOverlay.classList.remove('flex');
@@ -1326,7 +1476,33 @@ dragOverlay.addEventListener('drop', (e) => {
     }
     
     processFiles(e.dataTransfer.files);
-});
+}
+
+dragOverlay.addEventListener('drop', handleAttachmentDrop);
+chatContainer.addEventListener('drop', handleAttachmentDrop);
+welcomePane?.addEventListener('drop', handleAttachmentDrop);
+
+if (welcomePane) {
+    welcomePane.addEventListener('dragenter', (e) => {
+        e.preventDefault();
+        const types = e.dataTransfer.types;
+        if (types.includes('Files') || types.includes('application/json')) {
+            dragOverlay.classList.remove('hidden');
+            dragOverlay.classList.add('flex');
+        }
+    });
+    
+    welcomePane.addEventListener('dragover', (e) => {
+        e.preventDefault();
+    });
+    
+    welcomePane.addEventListener('dragleave', (e) => {
+        if (!e.relatedTarget || !welcomePane.contains(e.relatedTarget)) {
+            dragOverlay.classList.add('hidden');
+            dragOverlay.classList.remove('flex');
+        }
+    });
+}
 
 // Helper for adding Workspace file references to Chat Attachments
 function processWorkspaceFileToChat(file) {
@@ -1337,14 +1513,15 @@ function processWorkspaceFileToChat(file) {
         size: 0, 
         base64: "" // Safe loaded bypass
     };
-    currentFiles.push(fileItem);
-    renderFilePreviews();
+    pendingFiles.push(fileItem);
+    renderPreviews();
 }
 
 // WebSocket Logic
 function connectWebSocket() {
     updateConnectionStatus('connecting');
     
+    websocketThreadId = currentSessionId;
     socket = new WebSocket(`ws://127.0.0.1:8000/ws/chat/${currentSessionId}`);
     
     socket.onopen = () => {
@@ -1361,6 +1538,8 @@ function connectWebSocket() {
         } else if (data.type === 'tool_execution') {
             // Handle tool execution display
             handleToolExecution(data);
+        } else if (data.type === 'interrupt') {
+            handleSecurityInterrupt(data.interrupts || []);
         } else if (data.type === 'model_info') {
             // Track which model was used
             currentModelUsed = data.model || 'unknown';
@@ -1378,6 +1557,7 @@ function connectWebSocket() {
     
     socket.onclose = (event) => {
         console.log(`[WS Check] Closed. Code: ${event.code}, Reason: ${event.reason || 'None'}`);
+        resetTransientExecutionUI();
         updateConnectionStatus('disconnected');
         // Auto reconnect after 3 seconds
         setTimeout(connectWebSocket, 3000);
@@ -1394,10 +1574,20 @@ function connectWebSocket() {
 
 // Handle tool execution events
 function handleToolExecution(data) {
-    const { tool_name, status, input, output, error, duration } = data;
+    const { tool_name, status, input, output, error, duration, tool_call_id } = data;
+    const toolKey = tool_call_id || `tool:${tool_name || 'unknown'}`;
+
+    if (status === 'running') {
+        activeToolName = tool_name || null;
+        showThinkingIndicator();
+        updateThinkingIndicatorText();
+    } else if (activeToolName && tool_name && activeToolName === tool_name) {
+        activeToolName = null;
+        updateThinkingIndicatorText();
+    }
     
     let wrapper = messagesArea.lastElementChild;
-    if (!wrapper || wrapper.dataset.sender !== 'agent') {
+    if (!wrapper || !['agent', 'agent-thinking'].includes(wrapper.dataset.sender)) {
         wrapper = document.createElement('div');
         wrapper.className = 'flex gap-4 group-msg mb-6';
         wrapper.dataset.sender = 'agent';
@@ -1412,7 +1602,29 @@ function handleToolExecution(data) {
         wrapper.appendChild(contentDiv);
         messagesArea.appendChild(wrapper);
     }
-    
+    wrapper.dataset.sender = 'agent';
+
+    if (thinkingIndicatorEl && thinkingIndicatorEl === wrapper) {
+        clearThinkingIndicator();
+        wrapper = null;
+    }
+
+    if (!wrapper) {
+        wrapper = document.createElement('div');
+        wrapper.className = 'flex gap-4 group-msg mb-6';
+        wrapper.dataset.sender = 'agent';
+
+        const avatar = document.createElement('div');
+        avatar.className = 'w-8 h-8 rounded shrink-0 bg-anthropic flex items-center justify-center text-white mt-1';
+        avatar.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8V4H8"/><rect x="4" y="8" width="16" height="12" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>';
+        wrapper.appendChild(avatar);
+
+        const contentDiv = document.createElement('div');
+        contentDiv.className = 'flex-1 message-content text-base text-textdark';
+        wrapper.appendChild(contentDiv);
+        messagesArea.appendChild(wrapper);
+    }
+
     const contentDiv = wrapper.querySelector('.message-content');
     const toolCard = renderToolExecution(tool_name, status, input, output, error);
     
@@ -1422,13 +1634,95 @@ function handleToolExecution(data) {
         durationEl.textContent = `⏱ ${duration.toFixed(2)}s`;
         toolCard.appendChild(durationEl);
     }
-    
-    contentDiv.appendChild(toolCard);
+
+    if (liveToolCards.has(toolKey)) {
+        const existingCard = liveToolCards.get(toolKey);
+        existingCard.replaceWith(toolCard);
+    } else {
+        contentDiv.appendChild(toolCard);
+    }
+    if (status === 'running') {
+        liveToolCards.set(toolKey, toolCard);
+    } else {
+        liveToolCards.delete(toolKey);
+    }
+    moveActiveAnswerToEnd();
     scrollToBottom();
+}
+
+function _safeToolArgsPreview(args) {
+    try {
+        if (typeof args === 'string') return args.slice(0, 200);
+        return JSON.stringify(args).slice(0, 200);
+    } catch (_) {
+        return '[unavailable]';
+    }
+}
+
+async function showSecurityApprovalConfirm(interruptPayload) {
+    const calls = Array.isArray(interruptPayload?.sensitive_tool_calls) ? interruptPayload.sensitive_tool_calls : [];
+    const toolNames = calls.map((c) => String(c?.name || 'unknown_tool'));
+    const summary = toolNames.length > 0
+        ? `Sensitive action requested for: ${toolNames.join(', ')}`
+        : 'Sensitive action requested.';
+
+    const details = calls.length > 0
+        ? `\n\nDetails:\n${calls.map((c) => `- ${c.name}: ${_safeToolArgsPreview(c.args)}`).join('\n')}`
+        : '';
+
+    return new Promise((resolve) => {
+        const modal = document.getElementById('customConfirmModal');
+        const titleEl = document.getElementById('confirmModalTitle');
+        const messageEl = document.getElementById('confirmModalMessage');
+        const confirmBtn = document.getElementById('confirmConfirmBtn');
+        const cancelBtn = document.getElementById('cancelConfirmBtn');
+
+        if (!modal || !titleEl || !messageEl || !confirmBtn || !cancelBtn) {
+            resolve(confirm(`${summary}\n\nApprove to continue?`));
+            return;
+        }
+
+        titleEl.textContent = 'Approve Sensitive Tool Action';
+        messageEl.textContent = `${summary}${details}\n\nApprove to continue, or cancel to deny.`;
+        confirmBtn.className = "px-4 py-2 rounded-xl text-sm bg-anthropic text-white hover:bg-opacity-90 transition-opacity font-medium";
+        confirmBtn.textContent = "Approve";
+        cancelBtn.textContent = "Deny";
+
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+
+        const cleanup = (result) => {
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+            confirmBtn.onclick = null;
+            cancelBtn.onclick = null;
+            cancelBtn.textContent = "Cancel";
+            resolve(result);
+        };
+
+        confirmBtn.onclick = () => cleanup(true);
+        cancelBtn.onclick = () => cleanup(false);
+    });
+}
+
+async function handleSecurityInterrupt(interrupts) {
+    const first = Array.isArray(interrupts) && interrupts.length > 0 ? interrupts[0] : null;
+    if (!first || typeof first !== 'object') return;
+
+    activeToolName = null;
+    showThinkingIndicator();
+    const textEl = thinkingIndicatorEl?.querySelector('#thinkingText');
+    if (textEl) textEl.textContent = 'Waiting for approval to run sensitive action...';
+
+    const approved = await showSecurityApprovalConfirm(first);
+    if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ type: 'security_approval', approved: Boolean(approved) }));
+    }
 }
 
 // Render error with better styling
 function renderErrorUI(message, title = 'Error', details = null) {
+    resetTransientExecutionUI();
     const wrapper = document.createElement('div');
     wrapper.className = 'flex gap-4 group-msg mb-6';
     wrapper.dataset.sender = 'error';
@@ -1481,6 +1775,7 @@ function updateConnectionStatus(status) {
 function updateAgentStatus(status) {
     if (status === 'idle') {
         isReasoning = false;
+        resetTransientExecutionUI();
         agentStatus.textContent = 'Waiting for input...';
         agentStatus.className = 'mt-2 text-xs font-mono text-gray-400';
         sendBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>';
@@ -1489,12 +1784,51 @@ function updateAgentStatus(status) {
         finalizeActiveMessage();
     } else {
         isReasoning = true;
+        showThinkingIndicator();
+        updateThinkingIndicatorText();
         agentStatus.textContent = 'Agent is reasoning...';
         agentStatus.className = 'mt-2 text-xs font-mono text-anthropic animate-pulse';
         // Display a STOP Square button next to or inside the action scope
         sendBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-anthropic cursor-pointer hover:text-red-500"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor"/></svg>';
         sendBtn.title = "Stop Generating";
         sendBtn.disabled = false; // Ensure click is enabled for Stop
+    }
+}
+
+async function ensureChatRegistered() {
+    if (chatRegisteredInBackend) return;
+    if (!currentSessionId) return;
+
+    const projectId = getChatProjectId();
+    if (!projectId) return;
+
+    const nameForRegistration = isUntitledName(currentChatName) ? 'Untitled' : (currentChatName || 'Untitled');
+
+    try {
+        await fetch(`http://127.0.0.1:8000/api/projects/${projectId}/chats`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: currentSessionId, name: nameForRegistration })
+        });
+
+        chatRegisteredInBackend = true;
+        localStorage.setItem(`project_session_${projectId}`, currentSessionId);
+
+        // Refresh cached project so recents updates across views
+        const res = await fetch(`http://127.0.0.1:8000/api/projects/${projectId}`);
+        const project = await res.json();
+        cachedProjects = cachedProjects.map((p) => (p.id === projectId ? project : p));
+
+        // Only re-render the sidebar recents if this chat belongs to the project currently being shown.
+        const sidebarProjectId = getEffectiveProjectId();
+        if (sidebarProjectId === projectId) {
+            if (projectChatsSection) projectChatsSection.classList.remove('hidden');
+            renderProjectChats(project.chats || []);
+            renderProjectInspector(project);
+        }
+        renderWelcomeRecents();
+    } catch (e) {
+        console.error('Failed to register chat with project:', e);
     }
 }
 
@@ -1521,59 +1855,66 @@ function processFiles(fileList) {
 }
 
 function renderPreviews() {
-    attachmentPreviews.innerHTML = '';
-    if (pendingFiles.length === 0) {
-        attachmentPreviews.classList.add('hidden');
-        return;
-    }
-    attachmentPreviews.classList.remove('hidden');
-    attachmentPreviews.className = 'flex flex-wrap gap-2 mb-2';
-    
-    pendingFiles.forEach((f, idx) => {
-        const chip = document.createElement('div');
-        chip.className = 'relative flex items-center gap-2 bg-cloud border border-bordercolor rounded-lg px-3 py-1.5 text-sm';
-        
-        if (f.preview) {
-            const img = document.createElement('img');
-            img.src = f.preview;
-            img.className = 'w-8 h-8 object-cover rounded';
-            chip.appendChild(img);
-        } else if (f.type === 'workspace_ref') {
-            // Workspace File Icon
-            const icon = document.createElement('div');
-            icon.className = 'w-8 h-8 rounded bg-orange-50 flex items-center justify-center text-orange-600';
-            icon.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 22h16a2 2 0 0 0 2-2V7.5L14.5 2H6a2 2 0 0 0-2 2v4"/><polyline points="14 2 14 8 20 8"/></svg>';
-            chip.appendChild(icon);
-            chip.classList.add('border-orange-200', 'bg-orange-50/50');
-        } else {
-            // File type icon
-            const icon = document.createElement('div');
-            icon.className = 'w-8 h-8 rounded bg-gray-200 flex items-center justify-center text-gray-600';
-            icon.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
-            chip.appendChild(icon);
+    const renderInto = (containerEl) => {
+        if (!containerEl) return;
+        containerEl.innerHTML = '';
+        if (pendingFiles.length === 0) {
+            containerEl.classList.add('hidden');
+            return;
         }
+        containerEl.classList.remove('hidden');
+        containerEl.className = 'flex flex-wrap gap-2 mb-2';
         
-        const name = document.createElement('span');
-        name.className = 'max-w-[120px] truncate text-gray-700';
-        name.textContent = f.name;
-        chip.appendChild(name);
-        
-        // Remove button
-        const removeBtn = document.createElement('button');
-        removeBtn.type = 'button';
-        removeBtn.className = 'ml-1 text-gray-400 hover:text-red-500 transition-colors';
-        removeBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
-        removeBtn.addEventListener('click', () => {
-            pendingFiles.splice(idx, 1);
-            renderPreviews();
+        pendingFiles.forEach((f, idx) => {
+            const chip = document.createElement('div');
+            chip.className = 'relative flex items-center gap-2 bg-cloud border border-bordercolor rounded-lg px-3 py-1.5 text-sm';
+            
+            if (f.preview) {
+                const img = document.createElement('img');
+                img.src = f.preview;
+                img.className = 'w-8 h-8 object-cover rounded';
+                chip.appendChild(img);
+            } else if (f.type === 'workspace_ref') {
+                // Workspace File Icon
+                const icon = document.createElement('div');
+                icon.className = 'w-8 h-8 rounded bg-orange-50 flex items-center justify-center text-orange-600';
+                icon.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 22h16a2 2 0 0 0 2-2V7.5L14.5 2H6a2 2 0 0 0-2 2v4"/><polyline points="14 2 14 8 20 8"/></svg>';
+                chip.appendChild(icon);
+                chip.classList.add('border-orange-200', 'bg-orange-50/50');
+            } else {
+                // File type icon
+                const icon = document.createElement('div');
+                icon.className = 'w-8 h-8 rounded bg-gray-200 flex items-center justify-center text-gray-600';
+                icon.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
+                chip.appendChild(icon);
+            }
+            
+            const name = document.createElement('span');
+            name.className = 'max-w-[120px] truncate text-gray-700';
+            name.textContent = f.name;
+            chip.appendChild(name);
+            
+            // Remove button
+            const removeBtn = document.createElement('button');
+            removeBtn.type = 'button';
+            removeBtn.className = 'ml-1 text-gray-400 hover:text-red-500 transition-colors';
+            removeBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+            removeBtn.addEventListener('click', () => {
+                pendingFiles.splice(idx, 1);
+                renderPreviews();
+            });
+            chip.appendChild(removeBtn);
+            
+            containerEl.appendChild(chip);
         });
-        chip.appendChild(removeBtn);
-        
-        attachmentPreviews.appendChild(chip);
-    });
+    };
+    
+    renderInto(attachmentPreviews);
+    renderInto(welcomeAttachmentPreviews);
 }
 
 function handleChunk(chunkText, metadata = {}) {
+    clearThinkingIndicator();
     if (!activeAiMessage) {
         const lastWrapper = messagesArea.lastElementChild;
         let wrapper, contentDiv;
@@ -1598,6 +1939,7 @@ function handleChunk(chunkText, metadata = {}) {
         }
         
         const mainContainer = document.createElement('div');
+        mainContainer.className = 'agent-final-answer';
         contentDiv.appendChild(mainContainer);
         
         activeAiMessage = {
@@ -1611,6 +1953,7 @@ function handleChunk(chunkText, metadata = {}) {
             thoughtText: ""
         };
     }
+    moveActiveAnswerToEnd();
 
     activeAiMessage.buffer += chunkText;
     let buf = activeAiMessage.buffer;
@@ -1809,7 +2152,7 @@ function addMessageActions(contentDiv, textContent, wrapper) {
     actionsDiv.appendChild(buttonsDiv);
     contentDiv.appendChild(actionsDiv);
 }
-function handleSend(e) {
+async function handleSend(e) {
     if (e) e.preventDefault();
 
     if (isReasoning) {
@@ -1819,8 +2162,12 @@ function handleSend(e) {
     
     const text = messageInput.value.trim();
     if ((!text && pendingFiles.length === 0) || socket.readyState !== WebSocket.OPEN) return;
+
+    // Register this thread once so it shows up in recents/history views.
+    await ensureChatRegistered();
+
     if (text) {
-        maybeAutoNameCurrentChat(text);
+        maybeAutoNameCurrentChat(text, pendingFiles.map(f => f.name));
     }
     
     // Optimistic UI
@@ -1832,6 +2179,7 @@ function handleSend(e) {
         text,
         pendingFiles.map(f => ({ name: f.name, type: f.type, data: f.data, path: f.path }))
     )));
+    hasSentMessageInCurrentSession = true;
 
     
     // Clear
@@ -1845,6 +2193,10 @@ function handleSend(e) {
 function stopLlm() {
     if (socket && socket.readyState === WebSocket.OPEN) {
         socket.send(JSON.stringify({ type: 'stop' }));
+        activeToolName = null;
+        showThinkingIndicator();
+        const textEl = thinkingIndicatorEl?.querySelector('#thinkingText');
+        if (textEl) textEl.textContent = 'Stopping generation...';
     }
 }
 
@@ -1989,6 +2341,9 @@ function renderUserMessage(text, files = []) {
 }
 
 function renderMessage(msg) {
+    if (msg.type === 'ai' || msg.type === 'tool') {
+        clearThinkingIndicator();
+    }
     if (msg.type === 'human') {
         renderUserMessage(msg.content);
         return;
@@ -1999,6 +2354,28 @@ function renderMessage(msg) {
     const hasToolCalls = msg.tool_calls && msg.tool_calls.length > 0;
     if (msg.type === 'ai' && !hasContent && !hasToolCalls) return;
     if (msg.type === 'tool' && !msg.content) return;
+
+    // Final model reply after tools: backend now sends this even when stream events were missed.
+    if (msg.type === 'ai' && hasContent && !hasToolCalls && activeAiMessage?.contentDiv) {
+        const sanitized = String(msg.content)
+            .replace(/```(?:json)?\s*\{[^}]*\}\s*```/gs, '')
+            .replace(/```(?:json)?\s*```/g, '')
+            .trim();
+        if (sanitized) {
+            if (!activeAiMessage.mainContainer) {
+                const mc = document.createElement('div');
+                mc.className = 'agent-final-answer';
+                activeAiMessage.contentDiv.appendChild(mc);
+                activeAiMessage.mainContainer = mc;
+            }
+            activeAiMessage.mainText = sanitized;
+            activeAiMessage.mainContainer.innerHTML = marked.parse(sanitized);
+            moveActiveAnswerToEnd();
+            finalizeActiveMessage();
+            scrollToBottom();
+            return;
+        }
+    }
 
     // --- Message Grouping Logic ---
     // We group AI messages and Tool results into the same visual block if they are consecutive.
@@ -2032,8 +2409,14 @@ function renderMessage(msg) {
 
     // --- Content Rendering ---
     if (msg.type === 'ai') {
-        // Reorder: Tool calls ABOVE content if both exist
+        // Reorder: tool plan / calls first, brief pre-tool text next, final answer comes last via stream or merge above
         if (hasToolCalls) {
+            if (!contentContainer.querySelector('.agent-process-label')) {
+                const lab = document.createElement('div');
+                lab.className = 'agent-process-label text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2';
+                lab.textContent = 'Tools & sources';
+                contentContainer.appendChild(lab);
+            }
             msg.tool_calls.forEach(tc => {
                 const toolDiv = createToolCallUI(tc);
                 contentContainer.appendChild(toolDiv);
@@ -2048,8 +2431,26 @@ function renderMessage(msg) {
                 .replace(/```(?:json)?\s*```/g, '')
                 .trim();
             if (sanitized) {
+                if (!hasToolCalls) {
+                    const existingFinal = contentContainer.querySelector('.agent-final-answer');
+                    if (existingFinal && (existingFinal.textContent || '').trim().length > 24) {
+                        scrollToBottom();
+                        return;
+                    }
+                }
+                if (hasToolCalls) {
+                    textDiv.className = 'text-sm text-gray-600 mb-2 border-l-2 border-gray-200 pl-3';
+                } else {
+                    textDiv.classList.add('agent-final-answer', 'mt-4', 'pt-3', 'border-t', 'border-bordercolor');
+                }
                 textDiv.innerHTML = marked.parse(sanitized);
                 contentContainer.appendChild(textDiv);
+                if (!hasToolCalls) {
+                    const groupWrapper = contentContainer.closest('.group-msg');
+                    if (groupWrapper) {
+                        addMessageActions(textDiv, sanitized, groupWrapper);
+                    }
+                }
             }
         }
     } else if (msg.type === 'tool') {
@@ -2671,6 +3072,10 @@ function getEffectiveProjectId() {
     return activeProjectId || 'default';
 }
 
+function getChatProjectId() {
+    return chatProjectIdForThread || getEffectiveProjectId();
+}
+
 function isUntitledName(name) {
     const value = String(name || '').trim().toLowerCase();
     return !value || value === 'untitled' || value === 'untitled chat' || value === 'new chat';
@@ -2893,7 +3298,8 @@ function applyChatsFilter() {
     const container = document.getElementById('chatsListContainer');
     if (!container) return;
     const q = normalizeText(document.getElementById('chatsSearchInput')?.value);
-    const filtered = cachedChats.filter(chat => normalizeText(chat.name || 'Untitled Chat').includes(q));
+    const sorted = [...cachedChats].sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
+    const filtered = sorted.filter(chat => normalizeText(chat.name || 'Untitled Chat').includes(q));
 
     container.innerHTML = '';
     if (filtered.length === 0) {
@@ -3045,6 +3451,9 @@ function switchView(viewName) {
         btn.classList.toggle('text-anthropic', isActive);
     });
     setWorkspaceVisibility();
+    if (viewName === 'welcome' || viewName === 'chat') {
+        renderPreviews(); // Keep attachment chips in sync across views
+    }
 }
 
 function initNavigation() {
@@ -3260,17 +3669,13 @@ function loadConnectorsList() {
 async function loadChatsList() {
     const container = document.getElementById('chatsListContainer');
     if (!container) return;
-    if (!hasSelectedProject) {
-        container.innerHTML = '<p class="text-xs text-gray-400 italic">Select a project to browse chats.</p>';
-        return;
-    }
     container.innerHTML = '<p class="text-xs text-gray-400">Loading chats...</p>';
     
     try {
         const res = await fetch(`http://127.0.0.1:8000/api/projects/${getEffectiveProjectId()}`);
         const project = await res.json();
         container.innerHTML = '';
-        cachedChats = project.chats || [];
+        cachedChats = (project.chats || []).sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
         if (cachedChats.length === 0) {
             container.innerHTML = '<p class="text-xs text-gray-400 italic">No chats in this project</p>';
             return;

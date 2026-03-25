@@ -9,16 +9,18 @@ This document explains the runtime control flow for a single chat turn, based on
 - `memory_inject` (enrich prompt context)
 - `router` (decide between `simple` vs `complex`)
 - `simple` (small model, no tools)
-- `complex` (large model, optional tools)
+- `complex_llm` (large model, optional tools; may emit tool calls)
+- `security_proxy` (policy / HITL gate before tool execution)
+- `tool_action` (runs `ToolNode` for approved calls)
 - `memory_write` (persist conversation + update long-term memory)
 
-Edges:
-- Entry: `memory_inject`
-- Linear: `memory_inject -> router`
-- Conditional: `router -> (simple | complex)`
-- Converge: `(simple | complex) -> memory_write -> END`
+Edges (simplified): `memory_inject -> router -> (simple | complex_llm)`; `complex_llm` may loop through `security_proxy` and `tool_action` before ending at `memory_write -> END`.
 
-There is currently no tool-selection node wired into the graph. Legacy nodes exist in the repo, but the active implementation uses `ToolNode` *inside* `complex_node()`.
+Legacy `complex_node()` (single-shot tools + second LLM call in one node) may still exist in `complex.py` but the **compiled graph** uses `complex_llm_node` + `complex_tool_action_node` as above.
+
+## Web research and excerpt RAG
+
+When `web_search_enabled` is true, the complex tool list includes `web_search` and `fetch_webpage`. Both accept an optional `focus_query`; when set, `web_search` reranks result snippets and `fetch_webpage` can return embedding-ranked excerpts (`[1]`, `[2]`, …) for long pages instead of only a truncated body. Implementation: [`src/tools/web_retrieval.py`](../src/tools/web_retrieval.py). HTTP fetches use SSRF checks in [`src/tools/url_policy.py`](../src/tools/url_policy.py). Tune behavior with `WEB_RAG_*` env vars (see [`src/config/settings.py`](../src/config/settings.py)).
 
 ## Node-by-node behavior
 
