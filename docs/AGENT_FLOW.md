@@ -1,116 +1,74 @@
 # Agent Flow (LangGraph + Nodes)
 
-This document explains the runtime control flow for a single chat turn, based on the current graph wiring in `src/agent/graph.py`.
+This reflects the current compiled graph in `src/agent/graph.py`.
 
-## Graph topology (the current default)
+## Current graph topology
 
-`src/agent/graph.py` builds a LangGraph `StateGraph` with these nodes:
+Nodes:
+- `memory_inject`
+- `router`
+- `simple`
+- `complex_llm`
+- `security_proxy`
+- `tool_action`
+- `memory_write`
 
-- `memory_inject` (enrich prompt context)
-- `router` (decide between `simple` vs `complex`)
-- `simple` (small model, no tools)
-- `complex_llm` (large model, optional tools; may emit tool calls)
-- `security_proxy` (policy / HITL gate before tool execution)
-- `tool_action` (runs `ToolNode` for approved calls)
-- `memory_write` (persist conversation + update long-term memory)
+Flow:
+1. `memory_inject -> router`
+2. `router -> simple` **or** `router -> complex_llm`
+3. `simple -> memory_write -> END`
+4. `complex_llm`:
+   - if no tool calls: `memory_write -> END`
+   - if tool calls: `security_proxy -> (tool_action or memory_write)`
+5. approved tool calls: `tool_action -> complex_llm` (loop)
 
-Edges (simplified): `memory_inject -> router -> (simple | complex_llm)`; `complex_llm` may loop through `security_proxy` and `tool_action` before ending at `memory_write -> END`.
+So the complex path is a secure cycle with mandatory policy/approval gate before tool execution.
 
-Legacy `complex_node()` (single-shot tools + second LLM call in one node) may still exist in `complex.py` but the **compiled graph** uses `complex_llm_node` + `complex_tool_action_node` as above.
-
-## Web research and excerpt RAG
-
-When `web_search_enabled` is true, the complex tool list includes `web_search` and `fetch_webpage`. Both accept an optional `focus_query`; when set, `web_search` reranks result snippets and `fetch_webpage` can return embedding-ranked excerpts (`[1]`, `[2]`, …) for long pages instead of only a truncated body. Implementation: [`src/tools/web_retrieval.py`](../src/tools/web_retrieval.py). HTTP fetches use SSRF checks in [`src/tools/url_policy.py`](../src/tools/url_policy.py). Tune behavior with `WEB_RAG_*` env vars (see [`src/config/settings.py`](../src/config/settings.py)).
-
-## Node-by-node behavior
+## Node roles
 
 ### `memory_inject` (`src/agent/nodes/memory.py`)
-
-Purpose: produce the `memory_context` string and persona summary passed into system prompts.
-
-Key behaviors:
-- Uses `MemoryContextCache` keyed by `thread_id` to avoid rebuilding context repeatedly.
-- Retrieves:
-  - long-term memory search results (Mem0 / `src/memory/long_term.py`)
-  - structured user profile (`src/memory/user_profile.py`)
-  - enhanced memory context (`get_memory_context_for_prompt()` from the personal assistant module)
-- Returns a partial state update:
-  - `memory_context`: formatted context block
-  - `persona`: persona role/summary string
+- Builds `memory_context` and persona text.
+- Uses `MemoryContextCache` keyed by thread.
+- Pulls long-term memory search results + profile + enhanced personal assistant context.
 
 ### `router` (`src/agent/nodes/router.py`)
-
-Purpose: decide `route` = `simple` or `complex`.
-
-Key behaviors:
-- If `web_search_enabled` is `true`, router checks for “web-ish” keywords and forces `complex` (fast path for live-data intents).
-- Otherwise it:
-  - checks a keyword list (greetings/thanks/bye -> `simple`)
-  - falls back to the small LLM routing prompt (`ROUTER_PROMPT`) and parses JSON
-- Safe default on parsing errors: `complex`
-
-The router returns `{"route": "<simple|complex>"}`.
+- Sets `route` to `simple` or `complex`.
+- Fast keyword and “web/live-data intent” heuristics first.
+- Falls back to small LLM JSON classification.
+- Safe fallback: `complex`.
 
 ### `simple` (`src/agent/nodes/simple.py`)
+- Small model, short direct answers, no tools.
+- Injects `response_style` hint.
+- Returns `model_used = "small"`.
 
-Purpose: quick answers using the small model without tool access.
+### `complex_llm` (`src/agent/nodes/complex.py`)
+- Large model reasoning step for the cyclic tool flow.
+- Binds tools (unless `mode == tools_off`).
+- Sets `pending_tool_calls` when tool calls are present.
+- Applies fallback text when model output is blank.
 
-Key behaviors:
-- Builds a system prompt that explicitly says: *“Do not use tools.”*
-- Includes:
-  - `memory_context` when present
-  - `response_style` instruction hint (from `src/agent/response_styles.py`)
-- Calls the small model (`get_small_llm()`)
-- Returns:
-  - `messages`: a single `AIMessage`
-  - `model_used`: `"small"`
+### `security_proxy` (`src/agent/nodes/security_proxy.py`)
+- Reviews pending tool calls against policy/approval.
+- Sets approval state used by conditional routing.
+- On denial, flow exits to `memory_write` without tool execution.
 
-### `complex` (`src/agent/nodes/complex.py`)
-
-Purpose: deeper reasoning and optionally tool use (large model).
-
-Key behaviors:
-- If `mode == "tools_off"`:
-  - calls large model with no tool binding
-  - returns a single `AIMessage`
-- Otherwise (`tools_on`):
-  - selects a tool list depending on `web_search_enabled`:
-    - with web: `COMPLEX_TOOLS_WITH_WEB`
-    - without web: `COMPLEX_TOOLS_NO_WEB`
-  - binds tools to the large model via `.bind_tools(tools)`
-  - first calls the large model
-  - if the model includes tool calls:
-    - executes them with `ToolNode`
-    - calls the large model again to produce the final response grounded in tool results
-
-Returns:
-- `messages`: streaming-compatible sequence of messages produced by the large model + tool outputs
-- `model_used`: `"large"`
+### `tool_action` (`src/agent/nodes/complex.py::complex_tool_action_node`)
+- Executes approved tool calls via `ToolNode`.
+- Appends tool messages.
+- Can append a fetch retry nudge for weak static webpage results.
+- Returns to `complex_llm` for next reasoning step.
 
 ### `memory_write` (`src/agent/nodes/memory.py`)
+- Records conversation summary/topics/interests.
+- Writes enriched facts to long-term memory.
+- Invalidates per-thread memory cache.
 
-Purpose: persist per-turn conversation signals into the personal assistant memory system.
+## Tool binding source
 
-Key behaviors:
-- Extracts last human and last AI messages for the turn.
-- Calls `record_conversation()` in a background thread.
-- Extracts topics/interests with `TopicExtractor` and enriches facts with `MemoryEnricher`.
-- Adds the enriched fact to Mem0 (`memory.add(..., infer=True)`).
-- Invalidates `MemoryContextCache` for `thread_id`.
+Tool lists are defined in `src/agent/tool_sets.py`:
+- `COMPLEX_TOOLS_WITH_WEB`
+- `COMPLEX_TOOLS_NO_WEB`
 
-Note:
-- The current implementation returns `{}` (no additional state fields written by this node).
-
-## Legacy / unused code paths (important when modifying)
-
-The repo still contains:
-- `src/agent/nodes/tool_selector.py`
-- `src/agent/nodes/tool_executor.py`
-
-These are not currently wired into `src/agent/graph.py`.
-
-If you rewire graph edges to use them, you must:
-- align the state fields (`selected_tool`, `tool_result`, `route`)
-- update the frontend event handling expectations if you introduce new event types
-- update this document to reflect the new control flow
+These lists are used by both `complex_llm_node` and `complex_tool_action_node`, so keep them in sync with docs and policy.
 

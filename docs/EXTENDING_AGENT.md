@@ -18,7 +18,7 @@ What to change:
 - “web-ish” keyword forcing for `complex` (`_WEBISH_HINTS`)
 
 Risk to consider:
-- Routing only decides between `simple` and `complex` in the active graph.
+- Routing currently decides `simple` vs `complex`, where `complex` enters the `complex_llm -> security_proxy -> tool_action` cycle.
 - If you accidentally route web/live-data questions to `simple`, you will prevent tool usage because the `simple` node explicitly tells the model: “Do not use tools.”
 
 ### Option B: change `route_decision()` validation
@@ -41,7 +41,7 @@ Contract note:
 
 ## 3) Change “complex” behavior and tool usage
 
-Current control point: `src/agent/nodes/complex.py`
+Current control point: `src/agent/nodes/complex.py` (`complex_llm_node` and `complex_tool_action_node`)
 
 What to change:
 - `COMPLEX_PROMPT` and guidance strings (`COMPLEX_TOOL_GUIDANCE_WEB` / `_NO_WEB`)
@@ -50,7 +50,7 @@ What to change:
 
 ### Tool sets
 
-The actual tool sets used by `complex` come from `src/agent/tool_sets.py`.
+The actual tool sets used by the complex cycle come from `src/agent/tool_sets.py`.
 See `docs/TOOLS.md` for the exact list bound today.
 
 ## 4) Add/modify a tool
@@ -72,7 +72,7 @@ The repo includes:
 - `src/agent/nodes/tool_selector.py`
 - `src/agent/nodes/tool_executor.py`
 
-But the active graph in `src/agent/graph.py` does **not** wire them today; instead `complex_node()` directly uses a `ToolNode`.
+But the active graph in `src/agent/graph.py` does **not** wire them today; it uses `complex_llm` + `security_proxy` + `tool_action`.
 
 If you want to use these legacy nodes, you must update at least:
 - `src/agent/graph.py` topology (edges and conditional routing)
@@ -80,7 +80,7 @@ If you want to use these legacy nodes, you must update at least:
 - event forwarding expectations in `src/api/server.py` (if you introduce new message types)
 
 Practical recommendation:
-Prefer extending `complex_node()` + `ToolNode` unless you have a strong reason to centralize tool dispatch/approval elsewhere.
+Prefer extending the existing secure cycle (`complex_llm` + `security_proxy` + `tool_action`) unless you have a strong reason to reintroduce separate selector/executor nodes.
 
 ## 6) Change memory injection
 
@@ -94,7 +94,7 @@ What it does today:
 - caches by `thread_id` (`MemoryContextCache`)
 
 Risks:
-- If you change the formatting, prompts in `simple_node()` and `complex_node()` will see different context shapes.
+- If you change the formatting, prompts in `simple_node()` and `complex_llm_node()` will see different context shapes.
 - If you change what fields invalidate the cache, memory may appear “stale” to developers.
 
 ## 7) Change memory writing

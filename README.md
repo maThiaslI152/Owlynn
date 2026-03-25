@@ -6,6 +6,17 @@ A private, local-first autonomous agent based on Anthropic’s Cowork platform. 
 
 For detailed guides and architecture, refer to the `docs/` folder:
 
+### Contributor Start Here
+
+If you are modifying code, use this order:
+
+1. **[Architecture Overview](docs/ARCHITECTURE_OVERVIEW.md)** — high-level graph, memory, and backend layout.
+2. **[Agent Flow](docs/AGENT_FLOW.md)** — exact node wiring and control flow used at runtime.
+3. **[Chat & Events Protocol](docs/CHAT_PROTOCOL.md)** — frontend/backend WebSocket contract.
+4. **[Tools & Tool Binding](docs/TOOLS.md)** — what tools the large model can actually call.
+5. **[API Reference](docs/API_REFERENCE.md)** — REST endpoints and server entrypoints.
+6. **[Extending the Agent](docs/EXTENDING_AGENT.md)** — safe change points and regression checklist.
+
 *   **[Architecture Overview](docs/ARCHITECTURE_OVERVIEW.md)**: High-level system design and LangGraph flow describing current logic.
 *   **[Chat & Events Protocol](docs/CHAT_PROTOCOL.md)**: WebSocket payload/event contract
 *   **[Agent Flow](docs/AGENT_FLOW.md)**: Node-by-node LangGraph execution

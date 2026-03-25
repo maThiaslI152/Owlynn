@@ -119,7 +119,7 @@ Sent:
 
 Sent during streaming (LangGraph `on_chat_model_stream`) for nodes:
 - `simple`
-- `complex`
+- `complex_llm`
 - (legacy) `tool_executor` (not currently wired into the graph)
 
 Note: the current server implementation sends `content` and (effectively) omits metadata.
@@ -155,7 +155,37 @@ Current behavior:
 - `GraphSession` emits `content` only (no `title`/`details`).
 - the frontend tolerates this, but if you enhance errors you can standardize `title`/`details` here.
 
-### 5) `file_status`
+### 5) `tool_execution`
+
+The backend emits tool lifecycle events in the current implementation:
+
+Running:
+```json
+{
+  "type": "tool_execution",
+  "status": "running",
+  "tool_name": "string",
+  "tool_call_id": "string|null",
+  "input": "string|null"
+}
+```
+
+Finished:
+```json
+{
+  "type": "tool_execution",
+  "status": "success|error",
+  "tool_name": "string",
+  "tool_call_id": "string|null",
+  "output": "string|null",
+  "error": "string|null",
+  "duration": 1.23
+}
+```
+
+These are derived from `AIMessage.tool_calls` + `ToolMessage` outputs in `websocket_endpoint()`.
+
+### 6) `file_status`
 
 ```json
 { "type": "file_status", "name": "string", "status": "processed" | "deleted" }
@@ -166,7 +196,6 @@ Sent by `notify_file_processed()` to trigger UI refresh of the workspace file pa
 ## Events the frontend listens to (but the backend may not currently emit)
 
 - `model_info`: the frontend listens, but current backend code does not send it.
-- `tool_execution`: the frontend listens, but current backend code does not emit a separate `tool_execution` event.
 
 If you add those events in backend nodes, document the exact payload shapes in this file.
 

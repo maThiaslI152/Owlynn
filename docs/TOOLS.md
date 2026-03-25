@@ -6,11 +6,11 @@ This document explains which tools are available to the agent *in practice* and 
 
 The current LangGraph graph (`src/agent/graph.py`) routes only to:
 - `simple` (small model)
-- `complex` (large model)
+- `complex_llm` / `tool_action` (large model + ToolNode cycle)
 
 `simple` does not bind tools and also uses a system prompt that tells the model: *“Do not use tools.”*
 
-`complex` binds a curated list of tools depending on `web_search_enabled`, using:
+The complex cycle binds a curated list of tools depending on `web_search_enabled`, using:
 - `src/agent/tool_sets.py`:
   - `COMPLEX_TOOLS_WITH_WEB`
   - `COMPLEX_TOOLS_NO_WEB`
@@ -28,7 +28,7 @@ Concretely, the large model receives:
   - `read_workspace_file`
   - `recall_memories`
 
-These come from `src/agent/nodes/complex.py` and are bound via `.bind_tools(tools)` and executed via `ToolNode(tools)`.
+These come from `src/agent/nodes/complex.py` and are bound via `.bind_tools(tools)` in `complex_llm_node`, then executed via `ToolNode(tools)` in `complex_tool_action_node` (after `security_proxy` approval).
 
 ## 2) Tools implemented in `src/tools/*` (broader capability)
 
@@ -40,9 +40,8 @@ The repo contains additional tool implementations beyond the small set above, fo
   - `write_workspace_file`, `edit_workspace_file`, `delete_workspace_file`, etc.
 - Lightpanda browser automation tools (optional dependency):
   - `lightpanda_fetch_page`, `lightpanda_execute_js`, `lightpanda_screenshot`, ...
-- optional Lightpanda browser automation tools (see below)
 
-`fetch_webpage` is now part of `COMPLEX_TOOLS_WITH_WEB` (wired in `tool_sets.py`). Other fetch/edit/sandbox tools may still be MCP-only or legacy unless listed in `tool_sets.py`.
+`fetch_webpage` is part of `COMPLEX_TOOLS_WITH_WEB` (wired in `tool_sets.py`). Other tools are only usable by the model if explicitly added to the complex tool sets.
 
 ## 3) Adding a new tool (the safe path)
 
@@ -70,7 +69,7 @@ So when you modify tool execution behavior:
 
 The repo also includes `src/agent/nodes/tool_selector.py` and `src/agent/nodes/tool_executor.py`.
 
-These are legacy code paths and are not currently part of `src/agent/graph.py`.
+These are legacy code paths and are not currently part of the active compiled graph.
 
 If you rewire the graph to use them:
 - ensure state fields like `selected_tool` and `tool_result` are produced/consumed correctly
