@@ -3543,7 +3543,7 @@ function applyProjectsFilter() {
         card.className = `project-card${isPinned ? ' pinned' : ''}`;
         card.innerHTML = `
             <div class="project-card-name">${DOMPurify.sanitize(p.name)}</div>
-            <div class="project-card-desc">${DOMPurify.sanitize(p.instructions || 'No description')}</div>
+            <div class="project-card-desc">${DOMPurify.sanitize(p.instructions || 'No instructions')}</div>
             <div class="project-card-meta">${updatedText}${chatCount ? ' · ' + chatCount + ' chats' : ''}</div>
             <button class="project-card-menu" title="More">···</button>
         `;
@@ -3569,7 +3569,7 @@ function openProjectDetail(projectId) {
 
     const isPinned = Boolean(localStorage.getItem(`pinproj_${projectId}`));
     document.getElementById('projectDetailName').textContent = project.name || 'Project';
-    document.getElementById('projectDetailDesc').textContent = project.instructions || 'No description';
+    document.getElementById('projectDetailDesc').textContent = project.instructions || 'Add instructions to tailor responses for this project.';
     document.getElementById('projectDetailInstructions').textContent = project.instructions || 'Add instructions to tailor responses for this project.';
     document.getElementById('projectDetailPin').textContent = isPinned ? '★' : '☆';
 

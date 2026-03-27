@@ -87,8 +87,20 @@ async def memory_inject_node(state: AgentState) -> AgentState:
     # Get enhanced memory context with topics and interests
     enhanced_context = get_memory_context_for_prompt()
 
+    # Get active project instructions (if in a project context)
+    project_instructions = ""
+    project_id = state.get("project_id")
+    if project_id and project_id != "default":
+        try:
+            from src.memory.project import project_manager
+            project = project_manager.get_project(project_id)
+            if project and project.get("instructions"):
+                project_instructions = project["instructions"]
+        except Exception:
+            pass
+
     # Format into a clean context block
-    memory_context = format_memory_context(results, profile, enhanced_context)
+    memory_context = format_memory_context(results, profile, enhanced_context, project_instructions)
     
     # Cache for subsequent requests (M4 optimization)
     MemoryContextCache.set(thread_id, memory_context)
@@ -98,11 +110,16 @@ async def memory_inject_node(state: AgentState) -> AgentState:
         "persona": persona.get("role", "None")
     }
 
-def format_memory_context(results: list, profile: dict, enhanced_context: str = "") -> str:
-    """Format memory context with profile, relevant memories, and enriched personal knowledge."""
+def format_memory_context(results: list, profile: dict, enhanced_context: str = "", project_instructions: str = "") -> str:
+    """Format memory context with profile, relevant memories, enriched personal knowledge, and project instructions."""
     lines = []
+
+    # Add project instructions first (highest priority context)
+    if project_instructions:
+        lines.append("=== Project Instructions ===")
+        lines.append(project_instructions)
     
-    # Add enhanced memory context first (topics, interests, recent convos)
+    # Add enhanced memory context (topics, interests, recent convos)
     if enhanced_context:
         lines.append("=== Your Knowledge About User ===")
         lines.append(enhanced_context)
