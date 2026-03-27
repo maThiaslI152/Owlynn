@@ -1074,6 +1074,47 @@ async function refreshSidebarRecents(projectId) {
     } catch (_) {}
 }
 
+async function editProjectInstructions(projectId, currentInstructions) {
+    const modal = document.getElementById('customInputModal');
+    const titleEl = document.getElementById('customInputTitle');
+    const labelEl = document.getElementById('customInputLabel');
+    const fieldEl = document.getElementById('customInputField');
+    const confirmBtn = document.getElementById('confirmCustomInputBtn');
+    const cancelBtn = document.getElementById('cancelCustomInputBtn');
+    const closeBtn = document.getElementById('closeCustomInputBtn');
+    if (!modal || !fieldEl) return;
+
+    titleEl.textContent = 'Edit Instructions';
+    const formArea = fieldEl.parentElement;
+    const origHTML = formArea.innerHTML;
+    formArea.innerHTML = `
+        <div class="form-field">
+            <label style="font-size:0.75rem;color:var(--text-muted)">Instructions for this project</label>
+            <textarea id="_editProjInstr" rows="6" style="margin-top:0.25rem;resize:vertical" placeholder="Add instructions to tailor Owlynn's responses for this project...">${DOMPurify.sanitize(currentInstructions || '')}</textarea>
+        </div>
+    `;
+    if (labelEl) labelEl.style.display = 'none';
+    modal.classList.remove('hidden'); modal.classList.add('flex');
+    document.getElementById('_editProjInstr')?.focus();
+
+    const result = await new Promise(resolve => {
+        const cleanup = (val) => { modal.classList.add('hidden'); modal.classList.remove('flex'); formArea.innerHTML = origHTML; if (labelEl) labelEl.style.display = ''; confirmBtn.onclick = null; cancelBtn.onclick = null; if (closeBtn) closeBtn.onclick = null; resolve(val); };
+        confirmBtn.onclick = () => cleanup(document.getElementById('_editProjInstr')?.value?.trim() ?? null);
+        cancelBtn.onclick = () => cleanup(null);
+        if (closeBtn) closeBtn.onclick = () => cleanup(null);
+    });
+
+    if (result === null) return;
+    try {
+        await fetch(`${API_BASE}/api/projects/${projectId}`, {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ instructions: result })
+        });
+        await loadProjects();
+        openProjectDetail(projectId);
+    } catch (e) { console.error('Failed to update instructions:', e); }
+}
+
 async function editProject(projectId, currentName) {
     const project = cachedProjects.find(p => p.id === projectId);
     const currentDesc = project?.instructions || '';
@@ -3619,7 +3660,7 @@ function openProjectDetail(projectId) {
         else localStorage.setItem(`pinproj_${projectId}`, '1');
         openProjectDetail(projectId); // refresh
     };
-    document.getElementById('projectEditInstructions').onclick = () => editProject(projectId, project.name);
+    document.getElementById('projectEditInstructions').onclick = () => editProjectInstructions(projectId, project.instructions);
     document.getElementById('projectUploadFile').onclick = () => {
         switchProject(projectId, false);
         document.getElementById('workspaceFileInput')?.click();

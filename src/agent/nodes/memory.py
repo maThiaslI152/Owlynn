@@ -14,6 +14,23 @@ from src.memory.personal_assistant import (
     get_relevant_topics, get_user_interests_summary
 )
 
+
+def _get_mem0_user_id(state: dict) -> str:
+    """
+    Return a STABLE user identifier for Mem0 so that memories are shared
+    across all chat threads.  Falls back to the user profile name, then 'owner'.
+    Previously this used thread_id which siloed memories per-thread.
+    """
+    # Prefer explicit user name from profile
+    try:
+        profile = get_profile()
+        name = (profile.get("name") or "").strip()
+        if name and name.lower() != "user":
+            return name
+    except Exception:
+        pass
+    return "owner"
+
 # --- M4 OPTIMIZATION: Memory Context Cache ---
 class MemoryContextCache:
     """Cache memory context to avoid rebuilding for every request."""
@@ -66,14 +83,15 @@ async def memory_inject_node(state: AgentState) -> AgentState:
             "persona": persona.get("role", "None")
         }
     
-    # Semantic search against long-term memory (mem0 instance falls back to dictionary/list setup in long_term.py)
-    # We load it from long_term.py directly
+    # Semantic search against long-term memory using a STABLE user id
+    # so that memories are shared across all chat threads (not siloed per thread).
     from src.memory.long_term import memory
+    mem0_uid = _get_mem0_user_id(state)
     
     results = []
     if memory is not None:
          try:
-              results_dict = await asyncio.to_thread(memory.search, user_message, user_id=thread_id, limit=5)
+              results_dict = await asyncio.to_thread(memory.search, user_message, user_id=mem0_uid, limit=5)
               results = results_dict.get("results", []) if isinstance(results_dict, dict) else results_dict
          except Exception:
               pass
