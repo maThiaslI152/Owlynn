@@ -1,38 +1,24 @@
 """
-Core Native Tools for the Local Cowork Agent.
+Core Tools for the Local Cowork Agent.
 
-This module defines the primary tools available to the agent for managing
-files, executing code, updating profile/persona, and performing searches.
-All tools are wrapped using @tool for LangChain integration.
+File management, memory, and workspace tools.
+No sandbox/container dependencies — runs natively.
 """
 
 import os
-import shlex
 from langchain_core.tools import tool
-from .sandbox import PodmanSandbox
-from .thai_translation_tool import lookup_thai_terms
-from .web_tools import web_search, fetch_webpage
-
-from ..memory.user_profile import get_profile, update_profile
-from ..memory.memory_manager import save_memory, search_memories
-from ..memory.persona import get_persona, update_persona_field
-from ..memory.project import project_manager
-from ..memory.long_term import memory as long_term_memory
-from .mcp_client import get_mcp_tools
+from ..memory.memory_manager import search_memories
 from ..config.settings import WORKSPACE_DIR as _WORKSPACE_PATH
 from .workspace_context import tool_workspace_root
 
-# Whole workspace mount for the sandbox (includes workspace/projects/…)
 BASE_WORKSPACE_DIR = str(_WORKSPACE_PATH.resolve())
-sandbox = PodmanSandbox(workspace_path=BASE_WORKSPACE_DIR)
 
 
 def get_safe_workspace_path(filename: str) -> tuple[str, str | None]:
-    """Resolve a user/model path inside the active project workspace or explicit projects/… path."""
+    """Resolve a path inside the active project workspace."""
     filename = filename.lstrip("/")
     if filename.startswith("workspace/"):
-        filename = filename[len("workspace/") :]
-
+        filename = filename[len("workspace/"):]
     if filename.startswith("projects/"):
         workspace_root = BASE_WORKSPACE_DIR
     else:
@@ -41,425 +27,142 @@ def get_safe_workspace_path(filename: str) -> tuple[str, str | None]:
     filepath = os.path.abspath(os.path.join(workspace_root, filename))
     root_abs = os.path.abspath(workspace_root)
     base_abs = os.path.abspath(BASE_WORKSPACE_DIR)
-    if not filepath.startswith(root_abs):
-        return "", "Error: Access denied. Path is outside workspace."
-    if not filepath.startswith(base_abs):
+    if not filepath.startswith(root_abs) or not filepath.startswith(base_abs):
         return "", "Error: Access denied. Path is outside workspace."
     return filepath, None
 
-@tool
-def execute_sandboxed_shell(command: str) -> str:
-    """
-    Executes a bash shell command inside a secure Podman sandbox container.
-    Use this to install dependencies, run code, or manipulate files in the workspace.
-    The workspace is mounted at `/workspace` inside the container.
-    """
-    return sandbox.execute_shell(command)
 
 @tool
 def read_workspace_file(filename: str) -> str:
-    """
-    Reads the content of a file located in the agent's workspace.
-    """
+    """Reads the content of a file in the workspace."""
     filepath, err = get_safe_workspace_path(filename)
     if err:
         return err
     if not os.path.exists(filepath):
-        # Fuzzy match fallback for model typos or variations (e.g., stripped numbering)
         try:
-            filename_only = os.path.basename(filepath)
+            fn = os.path.basename(filepath)
             search_dir = os.path.dirname(filepath) or tool_workspace_root()
-            all_files = os.listdir(search_dir)
-            # Find files where the requested name is a substring of the real file, or vice versa
-            matches = [f for f in all_files if filename_only in f or f in filename_only]
+            matches = [f for f in os.listdir(search_dir) if fn in f or f in fn]
             if matches:
-                # Use the first best match found
                 filepath = os.path.join(search_dir, matches[0])
-                print(f"[Workspace] Fuzzy matched '{filename_only}' to '{matches[0]}'")
             else:
-                return f"Error: File '{filename}' not found in workspace."
+                return f"Error: File '{filename}' not found."
         except Exception:
-            return f"Error: File '{filename}' not found in workspace."
+            return f"Error: File '{filename}' not found."
 
-    
     processed_dir = os.path.join(BASE_WORKSPACE_DIR, ".processed")
-    filename_only = os.path.basename(filepath)
-    cached_txt = os.path.join(processed_dir, filename_only + ".txt")
-    cached_md = os.path.join(processed_dir, filename_only + ".md")
+    fn_only = os.path.basename(filepath)
+    cached_txt = os.path.join(processed_dir, fn_only + ".txt")
+    cached_md = os.path.join(processed_dir, fn_only + ".md")
 
     try:
-        # 1. Check for pre-processed cache first
         if os.path.exists(cached_txt):
             with open(cached_txt, 'r', encoding='utf-8') as f:
                 return f.read()
         elif os.path.exists(cached_md):
             with open(cached_md, 'r', encoding='utf-8') as f:
                 return f.read()
-
-        # 2. Fallback to on-the-fly processing (legacy support/race condition)
         if filepath.lower().endswith(".pdf"):
             import fitz
             doc = fitz.open(filepath)
-            text = ""
-            for page in doc:
-                text += page.get_text() + "\n\n"
+            text = "".join(page.get_text() + "\n\n" for page in doc)
             doc.close()
             return text if text.strip() else "This PDF has no extractable text layer."
-
-        # 3. Default text reading
-        with open(filepath, 'r') as f:
+        with open(filepath, 'r', encoding='utf-8') as f:
             return f.read()
-
     except Exception as e:
-        return f"Error reading file {filename}: {str(e)}"
+        return f"Error reading file {filename}: {e}"
+
 
 @tool
 def write_workspace_file(filename: str, content: str) -> str:
-    """
-    Writes content to a specific file in the agent's workspace.
-    Will overwrite the file if it already exists.
-    """
+    """Writes content to a file in the workspace. Overwrites if it exists."""
     filepath, err = get_safe_workspace_path(filename)
     if err:
         return err
-    
-    # Ensure subdirectory exists if passed (e.g., 'src/main.py')
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
-    
     try:
-        with open(filepath, 'w') as f:
+        with open(filepath, 'w', encoding='utf-8') as f:
             f.write(content)
-        return f"Successfully written to {filename}"
+        return f"✅ Written to {filename}"
     except Exception as e:
-        return f"Error writing file: {str(e)}"
-
-@tool
-def list_workspace_files(directory: str = ".", recursive: bool = False) -> str:
-    """
-    Lists files in the workspace. Use recursive=True for a tree view.
-    """
-    target_dir, err = get_safe_workspace_path(directory)
-    if err:
-        return err
-    if not os.path.exists(target_dir):
-        return f"Error: Directory '{directory}' not found."
-        
-    try:
-        if recursive:
-            # Simple recursive listing (equivalent to get_file_tree)
-            directory_quoted = shlex.quote(directory)
-            find_cmd = f"find {directory_quoted} -maxdepth 3 -not -path '*/.*' -not -path '*/__pycache__*'"
-            result = sandbox.execute_shell(find_cmd)
-            if not result or "Execution Error" in result:
-                return f"Error listing recursive files in {directory}."
-            lines = sorted([l for l in result.splitlines() if l.strip()])
-            return "📁 Workspace Tree:\n" + "\n".join(lines)
-        else:
-            files = os.listdir(target_dir)
-            files = sorted([f for f in files if not f.startswith('.')])
-            if not files:
-                return "Directory is empty."
-            return "\n".join(files)
-    except Exception as e:
-        return f"Error listing files: {str(e)}"
-
-@tool
-def execute_python_code(code: str) -> str:
-    """
-    Executes a block of Python code directly inside the sandbox container.
-    Use this for running Python scripts instead of `execute_sandboxed_shell`.
-
-    Pre-installed libraries include: matplotlib, pandas, numpy, scipy, seaborn.
-    Any files saved by your script will appear in the workspace folder.
-
-    The environment is non-interactive: stdin is not connected. Do NOT use input(),
-    getpass, or any code that waits for keyboard input — it will raise EOFError.
-    Use literal values, variables, or argparse with defaults for demos instead.
-    """
-    import uuid
-    filename = f".temp_{uuid.uuid4().hex[:8]}.py"
-    filepath = os.path.join(tool_workspace_root(), filename)
-    try:
-        with open(filepath, 'w') as f:
-            f.write(code)
-        rel = os.path.relpath(filepath, BASE_WORKSPACE_DIR)
-    except Exception as e:
-        return f"Error writing temporary python file: {str(e)}"
-    
-    # Run the script in the sandbox (cwd is repo workspace root /workspace)
-    result = sandbox.execute_shell(f"python {shlex.quote(rel)}")
-    
-    # Clean up
-    try:
-        os.remove(filepath)
-    except:
-        pass
-        
-    return result
-
-@tool
-def search_workspace_files(query: str, recursive: bool = True) -> str:
-    """
-    Searches for a specific text string or regex pattern within files in the workspace.
-    Returns a list of matching lines and their filenames.
-    
-    Args:
-        query: The string or regex pattern to search for.
-        recursive: Whether to search recursively through subdirectories.
-    """
-    # Use grep in the sandbox for efficient searching
-    query_quoted = shlex.quote(query)
-    grep_cmd = f"grep -rn{'r' if recursive else ''} --exclude-dir='.git' --exclude-dir='.venv' {query_quoted} ."
-    result = sandbox.execute_shell(grep_cmd)
-    
-    if not result.strip():
-        return f"No matches found for: \"{query}\""
-    
-    # Cap result length to avoid context overflow
-    if len(result) > 4000:
-        result = result[:4000] + "\n\n... [search results truncated]"
-        
-    return f"🔍 Search results for: \"{query}\":\n\n{result}"
+        return f"Error writing file: {e}"
 
 
 @tool
 def edit_workspace_file(filename: str, search_pattern: str, replacement_text: str) -> str:
     """
-    Performs a targeted search-and-replace on a specific file in the workspace.
-    This is more efficient than `write_workspace_file` for large files.
-    The search_pattern must match EXACTLY (including whitespace) to be replaced.
-    
+    Search-and-replace in a workspace file. The search_pattern must match exactly.
+
     Args:
-        filename: The path to the file to edit.
-        search_pattern: The exact block of text to find.
-        replacement_text: The new text to replace it with.
+        filename: Path to the file.
+        search_pattern: Exact text to find.
+        replacement_text: Text to replace it with.
     """
     filepath, err = get_safe_workspace_path(filename)
     if err:
         return err
     if not os.path.exists(filepath):
         return f"Error: File '{filename}' not found."
-        
     try:
-        with open(filepath, 'r') as f:
+        with open(filepath, 'r', encoding='utf-8') as f:
             content = f.read()
-            
         if search_pattern not in content:
-            return f"Error: Could not find exact search pattern in {filename}. Ensure whitespace matches exactly."
-            
-        new_content = content.replace(search_pattern, replacement_text)
-        with open(filepath, 'w') as f:
-            f.write(new_content)
-            
-        return f"✅ Successfully updated {filename} (replaced 1 occurrence)."
+            return f"Error: Pattern not found in {filename}."
+        with open(filepath, 'w', encoding='utf-8') as f:
+            f.write(content.replace(search_pattern, replacement_text))
+        return f"✅ Updated {filename}"
     except Exception as e:
-        return f"Error editing file: {str(e)}"
+        return f"Error editing file: {e}"
+
 
 @tool
-def delete_workspace_file(filename: str) -> str:
-    """
-    Deletes a file from the agent's workspace.
-    """
-    filepath, err = get_safe_workspace_path(filename)
-    if err:
-        return err
-    if not os.path.exists(filepath):
-        return f"Error: File '{filename}' not found."
-        
-    try:
-        os.remove(filepath)
-        return f"Successfully deleted {filename}"
-    except Exception as e:
-        return f"Error deleting file: {str(e)}"
-
-@tool
-def create_directory(directory: str) -> str:
-    """
-    Creates a new directory in the workspace.
-    """
+def list_workspace_files(directory: str = ".") -> str:
+    """Lists files in a workspace directory."""
     target_dir, err = get_safe_workspace_path(directory)
     if err:
         return err
+    if not os.path.exists(target_dir):
+        return f"Error: Directory '{directory}' not found."
     try:
-        os.makedirs(target_dir, exist_ok=True)
-        return f"Successfully created directory: {directory}"
-    except Exception as e:
-        return f"Error creating directory: {str(e)}"
-
-@tool
-def get_current_time() -> str:
-    """
-    Returns the current local date and time.
-    """
-    from datetime import datetime
-    now = datetime.now()
-    return f"🕒 Current Date and Time: {now.strftime('%A, %B %d, %Y %I:%M %p')}"
-
-@tool
-def get_workspace_stats() -> str:
-    """
-    Returns a summary of the workspace content (total files, size).
-    """
-    total_files = 0
-    total_size = 0
-    
-    for root, dirs, files in os.walk(BASE_WORKSPACE_DIR):
-        # Skip hidden files/dirs
-        files = [f for f in files if not f.startswith('.')]
-        dirs[:] = [d for d in dirs if not d.startswith('.')]
-        
+        files = sorted(f for f in os.listdir(target_dir) if not f.startswith('.'))
+        if not files:
+            return "Directory is empty."
+        lines = []
         for f in files:
-            fp = os.path.join(root, f)
-            total_files += 1
-            total_size += os.path.getsize(fp)
-            
-    # Format size
-    for unit in ['B', 'KB', 'MB', 'GB']:
-        if total_size < 1024:
-            size_str = f"{total_size:.2f} {unit}"
-            break
-        total_size /= 1024
-    else:
-        size_str = f"{total_size:.2f} TB"
-        
-    return f"📊 Workspace Stats:\n- Total Files: {total_files}\n- Total Size: {size_str}"
-
-# ─── Project Management Tools ───────────────────────────────────────────────
-
-@tool
-def list_projects() -> str:
-    """
-    Lists all available projects in the Local Cowork platform.
-    """
-    projects = project_manager.list_projects()
-    if not projects:
-        return "No projects found."
-    
-    lines = ["📂 Available Projects:"]
-    for p in projects:
-        lines.append(f"  • {p['name']} (ID: {p['id']})")
-    return "\n".join(lines)
-
-@tool
-def get_project_info(project_id: str) -> str:
-    """
-    Retrieves detailed information about a specific project, 
-    including its instructions and registered knowledge base files.
-    """
-    project = project_manager.get_project(project_id)
-    if not project:
-        return f"Error: Project ID '{project_id}' not found."
-    
-    info = [
-        f"📁 Project: {project['name']} (ID: {project['id']})",
-        f"📝 Instructions: {project.get('instructions', 'None')}",
-        "📄 Knowledge Base Files:"
-    ]
-    
-    files = project.get("files", [])
-    if not files:
-        info.append("  (No files registered)")
-    for f in files:
-        info.append(f"  • {f['name']} ({f['type']})")
-        
-    return "\n".join(info)
-
-@tool
-def search_project_knowledge(query: str, project_id: str = "default") -> str:
-    """
-    Searches the long-term knowledge base (vector memory) for a specific project.
-    Use this to find specific information previously stored in a project's knowledge base.
-    """
-    try:
-        results_dict = long_term_memory.search(query, user_id=project_id, limit=8)
-        results = results_dict.get("results", []) if isinstance(results_dict, dict) else results_dict
-        
-        if not results:
-            return f"No relevant knowledge found for '{query}' in project '{project_id}'."
-        
-        lines = [f"🧠 Knowledge Search Results for: \"{query}\" (Project: {project_id}):"]
-        for r in results:
-            lines.append(f"  • {r['memory']}")
+            fp = os.path.join(target_dir, f)
+            if os.path.isdir(fp):
+                lines.append(f"📁 {f}/")
+            else:
+                size = os.path.getsize(fp)
+                lines.append(f"📄 {f} ({size:,} bytes)")
         return "\n".join(lines)
     except Exception as e:
-        return f"Error searching project knowledge: {str(e)}"
+        return f"Error listing files: {e}"
+
 
 @tool
-def list_available_mcp_tools() -> str:
-    """
-    Lists all externally connected MCP (Model Context Protocol) tools.
-    These tools are provided by external servers and can extend the agent's capabilities.
-    """
-    mcp_tools = get_mcp_tools()
-    if not mcp_tools:
-        return "No external MCP tools are currently connected."
-    
-    lines = ["🛠️ Connected MCP Tools:"]
-    for t in mcp_tools:
-        lines.append(f"  • {t.name}: {t.description[:100]}...")
-    return "\n".join(lines)
-
-@tool
-async def add_to_knowledge_base(name: str, content: str, project_id: str = "default") -> str:
-    """
-    Adds a piece of text or a document to a project's permanent knowledge base.
-    This content will be indexed and available for future retrieval via RAG.
-    
-    Args:
-        name: A descriptive name for the knowledge piece (e.g. 'Project Requirements').
-        content: The actual text content to store.
-        project_id: The ID of the project to add this to.
-    """
+def delete_workspace_file(filename: str) -> str:
+    """Deletes a file from the workspace."""
+    filepath, err = get_safe_workspace_path(filename)
+    if err:
+        return err
+    if not os.path.exists(filepath):
+        return f"Error: File '{filename}' not found."
     try:
-        await project_manager.add_knowledge(project_id, name, content)
-        return f"✅ Successfully added '{name}' to knowledge base of project '{project_id}'."
+        os.remove(filepath)
+        return f"✅ Deleted {filename}"
     except Exception as e:
-        return f"Error adding to knowledge base: {str(e)}"
-
-# ─── Memory & Persona Tools ─────────────────────────────────────────────────
-
-@tool
-def update_user_profile(field: str, value: str) -> str:
-    """
-    Updates the user's profile with a new preference or personal detail.
-    Use this when the user tells you their name, preferred language,
-    education level, domains of interest, or response style.
-
-    Valid fields: name, preferred_language (e.g. 'th', 'en'),
-                  education_level, domains_of_interest (comma-separated), response_style.
-
-    Args:
-        field: The profile field to update.
-        value: The new value for that field.
-    """
-    try:
-        updated = update_profile(field, value)
-        return f"✅ Profile updated: {field} = {updated[field]}"
-    except Exception as e:
-        return f"[update_user_profile] Error: {e}"
-
-
-@tool
-def remember_fact(fact: str) -> str:
-    """
-    Saves an important fact about the user or their preferences to long-term memory.
-    Call this whenever the user shares something worth remembering across sessions,
-    e.g. 'I prefer Thai responses', 'I am studying cybersecurity', 'My name is Tim'.
-
-    Args:
-        fact: A concise factual statement to remember.
-    """
-    return save_memory(fact)
+        return f"Error deleting file: {e}"
 
 
 @tool
 def recall_memories(query: str) -> str:
     """
-    Searches long-term memory for facts related to a query.
-    Use this to check if you already know something about the user or their preferences.
+    Searches long-term memory for facts about the user.
 
     Args:
-        query: A topic or question to search memories for.
+        query: Topic or question to search for.
     """
     memories = search_memories(query, top_k=8)
     if not memories:
@@ -468,59 +171,3 @@ def recall_memories(query: str) -> str:
     for m in memories:
         lines.append(f"  • {m['fact']}  [{m['timestamp'][:10]}]")
     return "\n".join(lines)
-
-
-@tool
-def update_persona(field: str, value: str) -> str:
-    """
-    Updates the agent's persona (name, role, tone, or language preference).
-    Call this when the user asks you to change your name, be more formal/casual,
-    or adjust any aspect of your personality.
-
-    Valid fields: name, role, tone, language_preference.
-
-    Args:
-        field: The persona field to update.
-        value: The new value.
-    """
-    try:
-        updated = update_persona_field(field, value)
-        return f"✅ Persona updated: {field} = {updated[field]}"
-    except Exception as e:
-        return f"[update_persona] Error: {e}"
-
-
-# The list of all LangChain tools available to the agent
-CORE_TOOLS = [
-    execute_sandboxed_shell,
-    read_workspace_file,
-    write_workspace_file,
-    list_workspace_files,
-    search_workspace_files,
-    edit_workspace_file,
-    delete_workspace_file,
-    create_directory,
-    get_workspace_stats,
-    execute_python_code,
-    # RAG Thai translation
-    lookup_thai_terms,
-    # Web tools
-    web_search,
-    fetch_webpage,
-]
-
-# Add remaining tools
-CORE_TOOLS.extend([
-    # Memory & persona tools
-    update_user_profile,
-    remember_fact,
-    recall_memories,
-    update_persona,
-    get_current_time,
-    # Project & MCP tools
-    list_projects,
-    get_project_info,
-    search_project_knowledge,
-    list_available_mcp_tools,
-    add_to_knowledge_base,
-])

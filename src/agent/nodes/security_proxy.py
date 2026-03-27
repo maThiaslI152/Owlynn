@@ -16,12 +16,9 @@ from src.agent.state import AgentState
 
 
 SENSITIVE_TOOLS = {
-    "execute_sandboxed_shell",
-    "execute_python_code",
-    "delete_workspace_file",
     "write_workspace_file",
     "edit_workspace_file",
-    "create_directory",
+    "delete_workspace_file",
     "notebook_run",
 }
 

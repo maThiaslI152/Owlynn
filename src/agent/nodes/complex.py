@@ -9,7 +9,6 @@ from src.agent.llm import get_large_llm
 from src.agent.response_styles import style_instruction_for_prompt
 from src.agent.tool_sets import COMPLEX_TOOLS_NO_WEB, COMPLEX_TOOLS_WITH_WEB
 from src.agent.lm_studio_compat import with_system_for_local_server
-from src.tools.core_tools import read_workspace_file
 
 
 def _strip_thinking_tags(text: str) -> str:
@@ -45,10 +44,10 @@ COMPLEX_TOOL_GUIDANCE_WEB = (
 You have tools to help answer accurately:
 
 1) web_search / fetch_webpage: Search the web and fetch page content.
-2) read_workspace_file: Read files from the user's workspace.
-3) execute_python_code: Run Python in sandbox (non-interactive, no input()).
+2) read_workspace_file / write_workspace_file / edit_workspace_file: Read, write, and edit files.
+3) list_workspace_files / delete_workspace_file: List and delete files.
 4) recall_memories: Search long-term memories about the user.
-5) notebook_run / notebook_reset: Stateful Python REPL — variables persist between calls.
+5) notebook_run / notebook_reset: Python REPL for calculations and data processing.
 6) create_docx / create_xlsx / create_pptx / create_pdf: Generate documents.
 7) todo_add / todo_list / todo_complete: Manage the user's task list.
 8) list_skills / invoke_skill: Use reusable prompt templates.
@@ -64,10 +63,10 @@ Rules:
 COMPLEX_TOOL_GUIDANCE_NO_WEB = (
     """
 You have tools (web search is off for this chat):
-1) read_workspace_file: Read files from workspace.
-2) execute_python_code: Run Python in sandbox (non-interactive).
+1) read_workspace_file / write_workspace_file / edit_workspace_file: File management.
+2) list_workspace_files / delete_workspace_file: List and delete files.
 3) recall_memories: Search long-term memories.
-4) notebook_run / notebook_reset: Stateful Python REPL.
+4) notebook_run / notebook_reset: Python REPL for calculations.
 5) create_docx / create_xlsx / create_pptx / create_pdf: Generate documents.
 6) todo_add / todo_list / todo_complete: Manage tasks.
 7) list_skills / invoke_skill: Use reusable prompt templates.
@@ -310,6 +309,7 @@ def _looks_like_prose_tool_stall(response: AIMessage) -> bool:
 
 async def _auto_read_workspace_bundle(paths: list[str]) -> str:
     """Read files via the same tool implementation the graph uses (thread pool)."""
+    from src.tools.core_tools import read_workspace_file
     sections: list[str] = []
     per_cap = 28_000
     for raw in paths[:3]:
