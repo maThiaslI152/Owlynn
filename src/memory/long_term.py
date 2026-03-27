@@ -34,7 +34,7 @@ config = {
     "embedder": {
         "provider": "lmstudio",
         "config": {
-            "model": "text-embedding-nomic-embed-text-v1.5",
+            "model": "text-embedding-nomic-embed-text-v1.5@f16",
             "embedding_dims": 768,
             "lmstudio_base_url": "http://127.0.0.1:1234/v1",
         },

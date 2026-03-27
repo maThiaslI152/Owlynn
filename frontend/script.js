@@ -3561,7 +3561,8 @@ function applyChatsFilter() {
             <span class="chat-meta">${relTime}</span>
             <button class="chat-menu-btn icon-btn" style="width:28px;height:28px" title="More">···</button>
         `;
-        item.querySelector('.chat-title').onclick = () => {
+        item.onclick = (e) => {
+            if (e.target.closest('.chat-menu-btn') || e.target.closest('.chat-checkbox')) return;
             if (chatsSelectMode) {
                 const cb = item.querySelector('.chat-checkbox');
                 if (cb) { cb.checked = !cb.checked; cb.dispatchEvent(new Event('change', {bubbles:true})); }
