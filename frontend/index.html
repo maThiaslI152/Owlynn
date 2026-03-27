@@ -595,10 +595,118 @@
                 display: none !important;
             }
         }
+
+        /* Responsive sidebar */
+        @media (max-width: 767px) {
+            aside {
+                position: fixed !important;
+                z-index: 40;
+                height: 100vh;
+                transform: translateX(-100%);
+                transition: transform 0.2s ease;
+            }
+            aside.sidebar-open {
+                transform: translateX(0);
+            }
+            #sidebarOverlay {
+                display: none;
+            }
+            #sidebarOverlay.active {
+                display: block;
+            }
+        }
+
+        /* Responsive chat area */
+        @media (max-width: 640px) {
+            #chatContainer {
+                padding: 0.75rem !important;
+            }
+            #messagesArea {
+                padding-bottom: 8rem !important;
+            }
+            .message-content {
+                font-size: 0.92rem;
+            }
+            .message-content pre {
+                font-size: 0.8rem;
+                padding: 0.75rem;
+            }
+            .tool-execution-card {
+                padding: 0.75rem;
+            }
+            .composer-shell {
+                border-radius: 0.75rem;
+            }
+            .welcome-stack {
+                padding: 0 0.5rem;
+            }
+            .welcome-title {
+                font-size: 1.5rem !important;
+            }
+        }
+
+        /* Smooth resize transitions */
+        #workspacePanel {
+            transition: width 0.15s ease;
+            min-width: 240px;
+            max-width: 50vw;
+        }
+
+        /* Better scrollbar for chat */
+        #chatContainer::-webkit-scrollbar {
+            width: 6px;
+        }
+        #chatContainer::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        #chatContainer::-webkit-scrollbar-thumb {
+            background: rgba(174, 185, 211, 0.25);
+            border-radius: 3px;
+        }
+        #chatContainer::-webkit-scrollbar-thumb:hover {
+            background: rgba(174, 185, 211, 0.4);
+        }
+
+        /* Ask-user interrupt card */
+        .ask-user-card {
+            border: 1px solid rgba(199, 154, 59, 0.5);
+            border-radius: 0.75rem;
+            padding: 1rem;
+            margin: 1rem 0;
+            background: linear-gradient(135deg, rgba(199, 154, 59, 0.12) 0%, rgba(199, 154, 59, 0.04) 100%);
+        }
+        .ask-user-card input {
+            background: var(--owl-surface) !important;
+            border-color: rgba(199, 154, 59, 0.4) !important;
+        }
+        .ask-user-card button {
+            background: rgba(199, 154, 59, 0.2);
+            border: 1px solid rgba(199, 154, 59, 0.4);
+            color: #f6e2b4;
+        }
+        .ask-user-card button:hover {
+            background: rgba(199, 154, 59, 0.35);
+        }
+
+        /* Notebook output styling */
+        .notebook-output {
+            border-left: 3px solid #8b5cf6;
+            background: rgba(139, 92, 246, 0.06);
+        }
+
+        /* Todo badge */
+        .todo-badge {
+            background: rgba(16, 185, 129, 0.15);
+            color: #10b981;
+            border: 1px solid rgba(16, 185, 129, 0.3);
+        }
     </style>
     <!-- Keep production UI clean; errors remain in browser console -->
 </head>
 <body id="appShell" class="bg-cloud text-textdark font-sans h-screen flex overflow-hidden workspace-hidden">
+
+    <!-- Mobile sidebar overlay -->
+    <div id="sidebarOverlay" class="fixed inset-0 bg-black/50 z-30 md:hidden" onclick="toggleMobileSidebar(false)"></div>
 
     <!-- Full-screen drag overlay -->
     <div id="dragOverlay" class="hidden fixed inset-0 z-50 bg-white/80 backdrop-blur-sm flex-col items-center justify-center gap-4 pointer-events-none">
@@ -609,7 +717,7 @@
         </div>
     </div>
        <!-- Sidebar -->
-    <aside class="w-64 bg-cloud border-r border-bordercolor flex-col h-full hidden md:flex shrink-0">
+    <aside id="sidebarEl" class="w-64 bg-cloud border-r border-bordercolor flex-col h-full hidden md:flex shrink-0">
         <div class="p-4 flex items-center justify-between">
             <div class="flex items-center gap-2">
                 <div class="w-6 h-6 rounded bg-anthropic flex items-center justify-center text-white text-xs">🦉</div>
@@ -1077,7 +1185,7 @@
                     <svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
                 </button>
             </div>
-            <input type="file" id="workspaceFileInput" class="hidden" multiple accept="image/*,.pdf,.py,.txt,.md,.csv,.xlsx,.docx">
+            <input type="file" id="workspaceFileInput" class="hidden" multiple accept="image/*,.pdf,.py,.txt,.md,.csv,.xlsx,.xls,.docx,.pptx,.epub,.rtf,.json,.yaml,.yml,.toml,.html,.xml,.log,.zip,.tar,.gz">
         </div>
         
         <!-- Breadcrumbs Toolbar -->
@@ -1102,7 +1210,15 @@
         
         <!-- View: Welcome / New Chat -->
         <div id="view-welcome" class="view-pane flex-1 flex flex-col items-center justify-center p-4 md:p-6 bg-cloud/20">
-            <div class="welcome-stack w-full flex flex-col items-center gap-5 md:gap-6">
+            <!-- Mobile header for welcome -->
+            <header class="md:hidden fixed top-0 left-0 right-0 z-20 border-b border-bordercolor bg-cloud/95 backdrop-blur-sm p-3 flex items-center justify-between">
+                <button onclick="toggleMobileSidebar(true)" class="p-1.5 rounded-lg hover:bg-white/10 transition-colors">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+                </button>
+                <h1 class="font-semibold flex items-center gap-2 text-sm">Owlynn</h1>
+                <div class="w-8"></div>
+            </header>
+            <div class="welcome-stack w-full flex flex-col items-center gap-5 md:gap-6 mt-12 md:mt-0">
                 <!-- Welcome Title -->
                 <div class="welcome-title text-2xl md:text-4xl font-semibold tracking-tight">Welcome, Tim</div>
                 
@@ -1111,7 +1227,7 @@
                     <textarea 
                         id="welcomeInput" 
                         rows="2" 
-                        placeholder="Type / for skills" 
+                        placeholder="Ask anything, or try: research, summarize, briefing, todo..." 
                         class="welcome-composer-input w-full resize-none text-base outline-none text-textdark placeholder-gray-500 no-scrollbar bg-transparent"
                     ></textarea>
                     <!-- Attached files preview (general/welcome composer) -->
@@ -1159,8 +1275,12 @@
         <!-- View: Chat (Existing Style) -->
         <div id="view-chat" class="view-pane hidden flex-1 flex flex-col h-full bg-white">
             <!-- Sticky Header for mobile -->
-            <header class="md:hidden border-b border-bordercolor bg-cloud p-4 flex items-center justify-between">
-                <h1 class="font-semibold flex items-center gap-2">Owlynn</h1>
+            <header class="md:hidden border-b border-bordercolor bg-cloud p-3 flex items-center justify-between">
+                <button onclick="toggleMobileSidebar(true)" class="p-1.5 rounded-lg hover:bg-white/10 transition-colors">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+                </button>
+                <h1 class="font-semibold flex items-center gap-2 text-sm">Owlynn</h1>
+                <div class="w-8"></div>
             </header>
 
             <!-- Messages Container -->
@@ -1176,7 +1296,7 @@
                     <div id="attachmentPreviews" class="hidden flex flex-wrap gap-2 mb-2"></div>
 
                     <form id="chatForm" class="composer-shell flex flex-col overflow-visible focus-within:ring-1 focus-within:ring-anthropic/40">
-                        <input type="file" id="fileInput" class="hidden" multiple accept="image/*,.pdf,.py,.txt,.md,.csv,.json">
+                        <input type="file" id="fileInput" class="hidden" multiple accept="image/*,.pdf,.py,.txt,.md,.csv,.json,.xlsx,.xls,.docx,.pptx,.epub,.rtf,.yaml,.yml,.toml,.html,.xml,.log,.zip">
                         <textarea 
                             id="messageInput" 
                             rows="1" 

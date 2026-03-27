@@ -1052,6 +1052,14 @@ async def websocket_endpoint(websocket: WebSocket, thread_id: str):
                 )
                 continue
 
+            if payload.get("type") == "ask_user_response":
+                answer = str(payload.get("answer", ""))
+                await session.start_run(
+                    Command(resume={"answer": answer}),
+                    config=config
+                )
+                continue
+
             user_input = payload.get("message", "")
             files = payload.get("files", [])
             payload_mode = payload.get("mode", "tools_on")

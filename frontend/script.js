@@ -1736,6 +1736,12 @@ async function handleSecurityInterrupt(interrupts) {
     const first = Array.isArray(interrupts) && interrupts.length > 0 ? interrupts[0] : null;
     if (!first || typeof first !== 'object') return;
 
+    // Handle ask_user interrupts (agent asking a clarifying question)
+    if (first.type === 'ask_user' || first.question) {
+        handleAskUserInterrupt(first);
+        return;
+    }
+
     activeToolName = null;
     showThinkingIndicator();
     const textEl = thinkingIndicatorEl?.querySelector('#thinkingText');
@@ -1744,6 +1750,68 @@ async function handleSecurityInterrupt(interrupts) {
     const approved = await showSecurityApprovalConfirm(first);
     if (socket && socket.readyState === WebSocket.OPEN) {
         socket.send(JSON.stringify({ type: 'security_approval', approved: Boolean(approved) }));
+    }
+}
+
+function handleAskUserInterrupt(payload) {
+    resetTransientExecutionUI();
+    const question = payload.question || 'The agent needs more information to continue.';
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'flex gap-4 group-msg mb-6';
+    wrapper.dataset.sender = 'ai';
+
+    const avatar = document.createElement('div');
+    avatar.className = 'w-8 h-8 rounded shrink-0 bg-anthropic flex items-center justify-center text-white mt-1';
+    avatar.textContent = '🦉';
+    wrapper.appendChild(avatar);
+
+    const contentDiv = document.createElement('div');
+    contentDiv.className = 'flex-1';
+
+    const card = document.createElement('div');
+    card.className = 'ask-user-card';
+    card.innerHTML = `
+        <div class="flex items-center gap-2 mb-3 text-sm font-medium" style="color: var(--owl-accent);">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            Agent needs your input
+        </div>
+        <p class="text-sm mb-3" style="color: var(--owl-text);">${escapeHtml(question)}</p>
+        <div class="flex gap-2">
+            <input type="text" class="flex-1 px-3 py-2 rounded-lg text-sm border outline-none focus:ring-1 focus:ring-[var(--owl-accent)]" placeholder="Type your answer..." id="askUserInput" />
+            <button onclick="submitAskUserResponse()" class="px-4 py-2 rounded-lg text-sm font-medium transition-colors">Send</button>
+        </div>
+    `;
+    contentDiv.appendChild(card);
+    wrapper.appendChild(contentDiv);
+    messagesArea.appendChild(wrapper);
+    scrollToBottom();
+
+    // Focus the input
+    setTimeout(() => {
+        const input = document.getElementById('askUserInput');
+        if (input) {
+            input.focus();
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') submitAskUserResponse();
+            });
+        }
+    }, 100);
+}
+
+function submitAskUserResponse() {
+    const input = document.getElementById('askUserInput');
+    if (!input) return;
+    const answer = input.value.trim();
+    if (!answer) return;
+
+    // Disable the input
+    input.disabled = true;
+    input.parentElement.querySelector('button').disabled = true;
+    input.parentElement.querySelector('button').textContent = 'Sent';
+
+    if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ type: 'ask_user_response', answer }));
     }
 }
 
@@ -3818,3 +3886,57 @@ window.addEventListener('resize', () => {
 if (typeof switchView === 'function') switchView('welcome');
 if (typeof initNavigation === 'function') initNavigation();
 renderWelcomeRecents();
+
+// ─── Mobile Sidebar Toggle ─────────────────────────────────────────────────
+function toggleMobileSidebar(open) {
+    const sidebar = document.getElementById('sidebarEl');
+    const overlay = document.getElementById('sidebarOverlay');
+    if (!sidebar) return;
+
+    if (open) {
+        sidebar.classList.add('sidebar-open');
+        sidebar.classList.remove('hidden');
+        sidebar.classList.add('flex');
+        if (overlay) overlay.classList.add('active');
+    } else {
+        sidebar.classList.remove('sidebar-open');
+        if (overlay) overlay.classList.remove('active');
+        // On mobile, re-hide after transition
+        if (window.innerWidth < 768) {
+            setTimeout(() => {
+                if (!sidebar.classList.contains('sidebar-open')) {
+                    sidebar.classList.add('hidden');
+                    sidebar.classList.remove('flex');
+                }
+            }, 220);
+        }
+    }
+}
+
+// Close mobile sidebar when navigating
+const origSwitchView = typeof switchView === 'function' ? switchView : null;
+if (origSwitchView) {
+    // Patch switchView to close mobile sidebar
+    const _origSV = switchView;
+    // Can't reassign const, so we hook via nav clicks
+}
+
+// Close sidebar on nav item click (mobile)
+document.querySelectorAll('#mainNav .nav-item, #newChatBtn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+        if (window.innerWidth < 768) toggleMobileSidebar(false);
+    });
+});
+
+// Escape HTML helper (if not already defined)
+if (typeof escapeHtml !== 'function') {
+    window.escapeHtml = function(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    };
+}
+
+// Make toggleMobileSidebar globally accessible
+window.toggleMobileSidebar = toggleMobileSidebar;
+window.submitAskUserResponse = submitAskUserResponse;
