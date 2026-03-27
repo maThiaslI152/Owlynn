@@ -259,14 +259,14 @@ setWorkspaceVisibility();
 async function loadSettingsData() {
     try {
         const [profileRes, personaRes, memoriesRes, systemRes, advancedRes, topicsRes, interestsRes, conversationsRes] = await Promise.all([
-            fetch('http://127.0.0.1:8000/api/profile'),
-            fetch('http://127.0.0.1:8000/api/persona'),
-            fetch('http://127.0.0.1:8000/api/memories'),
-            fetch('http://127.0.0.1:8000/api/system-settings').catch(() => null),
-            fetch('http://127.0.0.1:8000/api/advanced-settings').catch(() => null),
-            fetch('http://127.0.0.1:8000/api/topics').catch(() => null),
-            fetch('http://127.0.0.1:8000/api/interests').catch(() => null),
-            fetch('http://127.0.0.1:8000/api/conversations').catch(() => null)
+            fetch('/api/profile'),
+            fetch('/api/persona'),
+            fetch('/api/memories'),
+            fetch('/api/system-settings').catch(() => null),
+            fetch('/api/advanced-settings').catch(() => null),
+            fetch('/api/topics').catch(() => null),
+            fetch('/api/interests').catch(() => null),
+            fetch('/api/conversations').catch(() => null)
         ]);
         
         const profile = await profileRes.json();
@@ -280,10 +280,26 @@ async function loadSettingsData() {
 
         // Populate Profile
         if (profileNameInput) profileNameInput.value = profile.name || '';
+        // Update welcome heading and sidebar profile name
+        const welcomeH = document.getElementById('welcomeHeading');
+        if (welcomeH) welcomeH.textContent = `Welcome, ${profile.name || 'User'}`;
+        const profileDisp = document.getElementById('profileNameDisplay');
+        if (profileDisp) profileDisp.textContent = profile.name || 'User';
+        const profileAvatar = document.querySelector('.profile-avatar');
+        if (profileAvatar) profileAvatar.textContent = (profile.name || 'U')[0].toUpperCase();
         if (profileLangInput) profileLangInput.value = profile.preferred_language || 'en';
         if (profileStyleInput) profileStyleInput.value = profile.response_style || 'detailed';
         if (profileLlmUrlInput) profileLlmUrlInput.value = profile.llm_base_url || 'http://127.0.0.1:8080/v1';
         if (profileLlmModelInput) profileLlmModelInput.value = profile.llm_model_name || 'qwen/qwen3.5-9b';
+        // Populate new small/large LLM fields
+        const smallUrlEl = document.getElementById('profileSmallLlmUrl');
+        const smallModelEl = document.getElementById('profileSmallLlmModel');
+        const largeUrlEl = document.getElementById('profileLargeLlmUrl');
+        const largeModelEl = document.getElementById('profileLargeLlmModel');
+        if (smallUrlEl) smallUrlEl.value = profile.small_llm_base_url || 'http://127.0.0.1:1234/v1';
+        if (smallModelEl) smallModelEl.value = profile.small_llm_model_name || '';
+        if (largeUrlEl) largeUrlEl.value = profile.large_llm_base_url || 'http://127.0.0.1:1234/v1';
+        if (largeModelEl) largeModelEl.value = profile.large_llm_model_name || '';
 
         updateComposerStyleQuickLabel();
 
@@ -584,7 +600,7 @@ async function deleteMemory(fact) {
     if (!confirmed) return;
     
     try {
-        const res = await fetch('http://127.0.0.1:8000/api/memories', {
+        const res = await fetch('/api/memories', {
             method: 'DELETE',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ fact })
@@ -670,7 +686,7 @@ addMemoryBtn?.addEventListener('click', async () => {
     if (!fact) return;
     
     try {
-        const res = await fetch('http://127.0.0.1:8000/api/memories', {
+        const res = await fetch('/api/memories', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ fact })
@@ -688,7 +704,7 @@ addMemoryBtn?.addEventListener('click', async () => {
 
 async function loadProjects() {
     try {
-        const res = await fetch('http://127.0.0.1:8000/api/projects');
+        const res = await fetch('/api/projects');
         const projects = await res.json();
         cachedProjects = projects;
         renderProjects(projects);
@@ -750,7 +766,7 @@ async function switchProject(projectId, resetChat = true) {
     loadWorkspaceFiles(); // Trigger workspace partition reload
     
     try {
-        const res = await fetch(`http://127.0.0.1:8000/api/projects/${projectId}`);
+        const res = await fetch(`/api/projects/${projectId}`);
         const project = await res.json();
         currentChatName = '';
         renderProjectInspector(project);
@@ -768,7 +784,7 @@ async function switchProject(projectId, resetChat = true) {
         renderProjectChats(project.chats || []);
         
         // Reload projects list to update active state
-        const allRes = await fetch('http://127.0.0.1:8000/api/projects');
+        const allRes = await fetch('/api/projects');
         const allProjects = await allRes.json();
         cachedProjects = allProjects;
         renderProjects(allProjects);
@@ -811,7 +827,7 @@ async function loadChatHistory(sessionId) {
     resetTransientExecutionUI();
     
     try {
-        const res = await fetch(`http://127.0.0.1:8000/api/history/${sessionId}`);
+        const res = await fetch(`/api/history/${sessionId}`);
         const history = await res.json();
         hasSentMessageInCurrentSession = history && history.length > 0;
         
@@ -916,7 +932,7 @@ async function switchChat(sessionId) {
     connectWebSocket();
     
     // Refresh project details to update active chat highlighting
-    const res = await fetch(`http://127.0.0.1:8000/api/projects/${getEffectiveProjectId()}`);
+    const res = await fetch(`/api/projects/${getEffectiveProjectId()}`);
     const project = await res.json();
     chatProjectIdForThread = getEffectiveProjectId();
     chatRegisteredInBackend = Boolean((project.chats || []).find((c) => c.id === sessionId));
@@ -930,7 +946,7 @@ async function editChat(chatId, currentName) {
     if (!newName || newName === currentName) return;
     
     try {
-        await fetch(`http://127.0.0.1:8000/api/projects/${getEffectiveProjectId()}/chats/${chatId}`, {
+        await fetch(`/api/projects/${getEffectiveProjectId()}/chats/${chatId}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name: newName })
@@ -947,7 +963,7 @@ async function deleteChat(chatId, chatName) {
     if (!confirmed) return;
     
     try {
-        await fetch(`http://127.0.0.1:8000/api/projects/${getEffectiveProjectId()}/chats/${chatId}`, {
+        await fetch(`/api/projects/${getEffectiveProjectId()}/chats/${chatId}`, {
             method: 'DELETE'
         });
         switchProject(getEffectiveProjectId(), false);
@@ -972,7 +988,7 @@ async function maybeAutoNameCurrentChat(userText, fileNames = []) {
         const projectId = getChatProjectId();
         const payloadFiles = (fileNames || []).map((n) => ({ name: n }));
 
-        const res = await fetch('http://127.0.0.1:8000/api/chats/generate-title', {
+        const res = await fetch('/api/chats/generate-title', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -988,7 +1004,7 @@ async function maybeAutoNameCurrentChat(userText, fileNames = []) {
         const finalName = nextName ? String(nextName).replace(/\s+/g, ' ').trim().slice(0, 60) : '';
         if (!finalName) return;
 
-        await fetch(`http://127.0.0.1:8000/api/projects/${projectId}/chats/${currentSessionId}`, {
+        await fetch(`/api/projects/${projectId}/chats/${currentSessionId}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name: finalName })
@@ -997,7 +1013,7 @@ async function maybeAutoNameCurrentChat(userText, fileNames = []) {
         currentChatName = finalName;
 
         // Refresh project data so recents reflect the new chat title.
-        const projectRes = await fetch(`http://127.0.0.1:8000/api/projects/${projectId}`);
+        const projectRes = await fetch(`/api/projects/${projectId}`);
         const project = await projectRes.json();
         cachedProjects = cachedProjects.map((p) => (p.id === projectId ? project : p));
 
@@ -1018,14 +1034,14 @@ async function maybeAutoNameCurrentChat(userText, fileNames = []) {
             const fallbackName = deriveChatTitle(userText);
             if (!fallbackName) return;
             const projectId = getChatProjectId();
-            await fetch(`http://127.0.0.1:8000/api/projects/${projectId}/chats/${currentSessionId}`, {
+            await fetch(`/api/projects/${projectId}/chats/${currentSessionId}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ name: fallbackName })
             });
             currentChatName = fallbackName;
             // Refresh cached project data so all recents surfaces show the title.
-            const projectRes = await fetch(`http://127.0.0.1:8000/api/projects/${projectId}`);
+            const projectRes = await fetch(`/api/projects/${projectId}`);
             const project = await projectRes.json();
             cachedProjects = cachedProjects.map((p) => (p.id === projectId ? project : p));
 
@@ -1052,7 +1068,7 @@ async function editProject(projectId, currentName) {
     if (!newName || newName === currentName) return;
     
     try {
-        await fetch(`http://127.0.0.1:8000/api/projects/${projectId}`, {
+        await fetch(`/api/projects/${projectId}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name: newName })
@@ -1068,7 +1084,7 @@ async function deleteProject(projectId, projectName) {
     if (!confirmed) return;
     
     try {
-        const res = await fetch(`http://127.0.0.1:8000/api/projects/${projectId}`, {
+        const res = await fetch(`/api/projects/${projectId}`, {
             method: 'DELETE'
         });
         const data = await res.json();
@@ -1102,7 +1118,7 @@ async function handleCreateProject() {
     const instructions = await showCustomInput('Project Details', 'Project Instructions (optional)');
     
     try {
-        const res = await fetch('http://127.0.0.1:8000/api/projects', {
+        const res = await fetch('/api/projects', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name, instructions })
@@ -1146,7 +1162,7 @@ settingsModal?.addEventListener('click', (e) => {
 
 // ===== SETTINGS TABS FUNCTIONALITY =====
 const settingsTabs = document.querySelectorAll('.settings-tab');
-const tabContents = document.querySelectorAll('.settings-tab-content');
+const tabContents = document.querySelectorAll('.settings-tab-content, .tab-content');
 
 settingsTabs.forEach(tab => {
     tab.addEventListener('click', () => {
@@ -1158,7 +1174,10 @@ settingsTabs.forEach(tab => {
         
         // Add active class to clicked tab and corresponding content
         tab.classList.add('active');
-        document.querySelector(`.settings-tab-content[data-tab="${tabName}"]`)?.classList.add('active');
+        // Support both old and new class names
+        const content = document.querySelector(`.settings-tab-content[data-tab="${tabName}"]`)
+            || document.querySelector(`.tab-content[data-tab="${tabName}"]`);
+        content?.classList.add('active');
         
         // Refresh memory data when Memory tab is opened
         if (tabName === 'memory') {
@@ -1179,10 +1198,10 @@ if (tabContents.length > 0) {
 async function loadMemoryTabData() {
     try {
         const [topicsRes, interestsRes, conversationsRes, memoriesRes] = await Promise.all([
-            fetch('http://127.0.0.1:8000/api/topics').catch(() => null),
-            fetch('http://127.0.0.1:8000/api/interests').catch(() => null),
-            fetch('http://127.0.0.1:8000/api/conversations').catch(() => null),
-            fetch('http://127.0.0.1:8000/api/memories')
+            fetch('/api/topics').catch(() => null),
+            fetch('/api/interests').catch(() => null),
+            fetch('/api/conversations').catch(() => null),
+            fetch('/api/memories')
         ]);
         
         const topicsData = topicsRes ? await topicsRes.json() : { topics: [] };
@@ -1231,7 +1250,7 @@ saveSystemPromptBtn?.addEventListener('click', async () => {
         tone: personaToneInput.value
     };
     try {
-        const res = await fetch('http://127.0.0.1:8000/api/system-settings', {
+        const res = await fetch('/api/system-settings', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data)
@@ -1249,7 +1268,7 @@ const longTermMemoryToggle = document.getElementById('longTermMemoryToggle');
 
 shortTermMemoryToggle?.addEventListener('change', async (e) => {
     try {
-        await fetch('http://127.0.0.1:8000/api/memory-settings', {
+        await fetch('/api/memory-settings', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ short_term_enabled: e.target.checked })
@@ -1261,7 +1280,7 @@ shortTermMemoryToggle?.addEventListener('change', async (e) => {
 
 longTermMemoryToggle?.addEventListener('change', async (e) => {
     try {
-        await fetch('http://127.0.0.1:8000/api/memory-settings', {
+        await fetch('/api/memory-settings', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ long_term_enabled: e.target.checked })
@@ -1313,7 +1332,7 @@ saveAdvancedBtn?.addEventListener('click', async () => {
         show_tool_execution: toolVisibilityToggle.checked
     };
     try {
-        await fetch('http://127.0.0.1:8000/api/advanced-settings', {
+        await fetch('/api/advanced-settings', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data)
@@ -1327,18 +1346,29 @@ saveAdvancedBtn?.addEventListener('click', async () => {
 
 saveProfileBtn?.addEventListener('click', async () => {
     const data = {
-        name: profileNameInput.value,
-        preferred_language: profileLangInput.value,
-        response_style: profileStyleInput.value,
-        llm_base_url: profileLlmUrlInput.value,
-        llm_model_name: profileLlmModelInput.value
+        name: profileNameInput?.value,
+        preferred_language: profileLangInput?.value,
+        response_style: profileStyleInput?.value,
+        llm_base_url: profileLlmUrlInput?.value,
+        llm_model_name: profileLlmModelInput?.value,
+        small_llm_base_url: document.getElementById('profileSmallLlmUrl')?.value,
+        small_llm_model_name: document.getElementById('profileSmallLlmModel')?.value,
+        large_llm_base_url: document.getElementById('profileLargeLlmUrl')?.value,
+        large_llm_model_name: document.getElementById('profileLargeLlmModel')?.value,
     };
+    // Remove undefined/null entries
+    Object.keys(data).forEach(k => { if (data[k] == null) delete data[k]; });
     try {
-        await fetch('http://127.0.0.1:8000/api/profile', {
+        await fetch('/api/profile', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data)
         });
+        // Update welcome heading
+        const welcomeH = document.getElementById('welcomeHeading');
+        if (welcomeH && data.name) welcomeH.textContent = `Welcome, ${data.name}`;
+        const profileDisp = document.getElementById('profileNameDisplay');
+        if (profileDisp && data.name) profileDisp.textContent = data.name;
         updateComposerStyleQuickLabel();
         alert('Profile saved!');
     } catch (e) {
@@ -1352,7 +1382,7 @@ savePersonaBtn?.addEventListener('click', async () => {
         tone: personaToneInput.value
     };
     try {
-        const res = await fetch('http://127.0.0.1:8000/api/persona', {
+        const res = await fetch('/api/persona', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data)
@@ -1549,7 +1579,7 @@ function connectWebSocket() {
     updateConnectionStatus('connecting');
     
     websocketThreadId = currentSessionId;
-    socket = new WebSocket(`ws://127.0.0.1:8000/ws/chat/${currentSessionId}`);
+    socket = new WebSocket(`ws://${location.host}/ws/chat/${currentSessionId}`);
     
     socket.onopen = () => {
         updateConnectionStatus('connected');
@@ -1900,7 +1930,7 @@ async function ensureChatRegistered() {
     const nameForRegistration = isUntitledName(currentChatName) ? 'Untitled' : (currentChatName || 'Untitled');
 
     try {
-        await fetch(`http://127.0.0.1:8000/api/projects/${projectId}/chats`, {
+        await fetch(`/api/projects/${projectId}/chats`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ id: currentSessionId, name: nameForRegistration })
@@ -1910,7 +1940,7 @@ async function ensureChatRegistered() {
         localStorage.setItem(`project_session_${projectId}`, currentSessionId);
 
         // Refresh cached project so recents updates across views
-        const res = await fetch(`http://127.0.0.1:8000/api/projects/${projectId}`);
+        const res = await fetch(`/api/projects/${projectId}`);
         const project = await res.json();
         cachedProjects = cachedProjects.map((p) => (p.id === projectId ? project : p));
 
@@ -2811,7 +2841,7 @@ async function loadWorkspaceFiles() {
     }
     
     try {
-        const res = await fetch(`http://127.0.0.1:8000/api/files?sub_path=${encodeURIComponent(currentSubPath)}&project_id=${getEffectiveProjectId()}`);
+        const res = await fetch(`/api/files?sub_path=${encodeURIComponent(currentSubPath)}&project_id=${getEffectiveProjectId()}`);
         const files = await res.json();
         renderWorkspaceFiles(files);
         renderBreadcrumbs();
@@ -2947,7 +2977,7 @@ async function deleteWorkspaceFile(name) {
     const confirmed = await showCustomConfirm('Delete File', `Are you sure you want to delete "${name}" from the workspace?`, true);
     if (!confirmed) return;
     try {
-        await fetch(`http://127.0.0.1:8000/api/files/${encodeURIComponent(name)}?sub_path=${encodeURIComponent(currentSubPath)}&project_id=${getEffectiveProjectId()}`, { method: 'DELETE' });
+        await fetch(`/api/files/${encodeURIComponent(name)}?sub_path=${encodeURIComponent(currentSubPath)}&project_id=${getEffectiveProjectId()}`, { method: 'DELETE' });
         loadWorkspaceFiles();
     } catch (e) {
         console.error('Failed to delete file:', e);
@@ -2958,7 +2988,7 @@ async function renameWorkspaceFile(name) {
     const newName = await showCustomInput('Rename File', 'New Name', name);
     if (!newName || newName === name) return;
     try {
-        await fetch(`http://127.0.0.1:8000/api/files/${encodeURIComponent(name)}/rename`, {
+        await fetch(`/api/files/${encodeURIComponent(name)}/rename`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ new_name: newName, sub_path: currentSubPath, project_id: getEffectiveProjectId() })
@@ -2975,7 +3005,7 @@ async function moveWorkspaceFile(filename, fullSrcPath, targetSubPath) {
         if (fullSrcPath.includes('/')) {
              current_sub = fullSrcPath.substring(0, fullSrcPath.lastIndexOf('/'));
         }
-        await fetch(`http://127.0.0.1:8000/api/files/${encodeURIComponent(filename)}/move`, {
+        await fetch(`/api/files/${encodeURIComponent(filename)}/move`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
@@ -3013,7 +3043,7 @@ workspaceFileInput?.addEventListener('change', async (e) => {
         formData.append('file', file);
 
         try {
-            await fetch(`http://127.0.0.1:8000/api/upload?sub_path=${encodeURIComponent(currentSubPath)}&project_id=${getEffectiveProjectId()}`, { method: 'POST', body: formData });
+            await fetch(`/api/upload?sub_path=${encodeURIComponent(currentSubPath)}&project_id=${getEffectiveProjectId()}`, { method: 'POST', body: formData });
         } catch (err) {
             console.error('Upload failed:', err);
         }
@@ -3066,7 +3096,7 @@ if (workspacePanel && workspaceDropZone) {
             const formData = new FormData();
             formData.append('file', file);
             try {
-                await fetch(`http://127.0.0.1:8000/api/upload?sub_path=${encodeURIComponent(currentSubPath)}&project_id=${getEffectiveProjectId()}`, { method: 'POST', body: formData });
+                await fetch(`/api/upload?sub_path=${encodeURIComponent(currentSubPath)}&project_id=${getEffectiveProjectId()}`, { method: 'POST', body: formData });
             } catch (err) {
                 console.error('Upload failed:', err);
             }
@@ -3175,7 +3205,7 @@ document.getElementById('newFolderBtn')?.addEventListener('click', async () => {
     if (!name) return;
     
     try {
-        const res = await fetch('http://127.0.0.1:8000/api/folders', {
+        const res = await fetch('/api/folders', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name: name, sub_path: currentSubPath, project_id: getEffectiveProjectId() })
@@ -3716,7 +3746,7 @@ async function loadProjectsGrid() {
     container.innerHTML = '<p class="text-xs text-gray-400">Loading projects...</p>';
     
     try {
-        const res = await fetch('http://127.0.0.1:8000/api/projects');
+        const res = await fetch('/api/projects');
         cachedProjects = await res.json();
         applyProjectsFilter();
         renderProjectInspector(cachedProjects.find((p) => p.id === activeProjectId) || null);
@@ -3731,7 +3761,7 @@ async function loadArtifactsGrid() {
     container.innerHTML = '<p class="text-xs text-gray-400">Loading artifacts...</p>';
     
     try {
-        const res = await fetch('http://127.0.0.1:8000/api/artifacts');
+        const res = await fetch('/api/artifacts');
         cachedArtifacts = await res.json();
         applyArtifactsFilter();
     } catch (e) {
@@ -3745,7 +3775,7 @@ async function loadSkillsList() {
     container.innerHTML = '<p class="text-xs text-gray-400">Loading skills...</p>';
     
     try {
-        const res = await fetch('http://127.0.0.1:8000/api/tools');
+        const res = await fetch('/api/tools');
         cachedTools = await res.json();
         container.innerHTML = '';
         cachedTools.forEach(t => {
@@ -3805,7 +3835,7 @@ async function loadChatsList() {
     container.innerHTML = '<p class="text-xs text-gray-400">Loading chats...</p>';
     
     try {
-        const res = await fetch(`http://127.0.0.1:8000/api/projects/${getEffectiveProjectId()}`);
+        const res = await fetch(`/api/projects/${getEffectiveProjectId()}`);
         const project = await res.json();
         container.innerHTML = '';
         cachedChats = (project.chats || []).sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
@@ -3822,8 +3852,8 @@ async function loadChatsList() {
 async function loadSearchViewData() {
     try {
         const [projectsRes, projectRes] = await Promise.all([
-            fetch('http://127.0.0.1:8000/api/projects'),
-            fetch(`http://127.0.0.1:8000/api/projects/${getEffectiveProjectId()}`)
+            fetch('/api/projects'),
+            fetch(`/api/projects/${getEffectiveProjectId()}`)
         ]);
         cachedProjects = await projectsRes.json();
         const activeProject = await projectRes.json();
@@ -3891,12 +3921,12 @@ if (typeof switchView === 'function') switchView('welcome');
 if (typeof initNavigation === 'function') initNavigation();
 renderWelcomeRecents();
 
-// ─── Mobile Sidebar Toggle ─────────────────────────────────────────────────
+// ─── Mobile Sidebar ────────────────────────────────────────────────────────
+
 function toggleMobileSidebar(open) {
     const sidebar = document.getElementById('sidebar') || document.getElementById('sidebarEl');
     const overlay = document.getElementById('sidebarOverlay');
     if (!sidebar) return;
-
     if (open) {
         sidebar.classList.add('open', 'sidebar-open');
         sidebar.classList.remove('hidden');
@@ -3916,22 +3946,15 @@ function toggleMobileSidebar(open) {
     }
 }
 
-// Close mobile sidebar when navigating
-const origSwitchView = typeof switchView === 'function' ? switchView : null;
-if (origSwitchView) {
-    // Patch switchView to close mobile sidebar
-    const _origSV = switchView;
-    // Can't reassign const, so we hook via nav clicks
-}
-
-// Close sidebar on nav item click (mobile)
+// Close sidebar on nav click (mobile)
 document.querySelectorAll('#mainNav .nav-item, #newChatBtn').forEach((btn) => {
     btn.addEventListener('click', () => {
         if (window.innerWidth < 768) toggleMobileSidebar(false);
     });
 });
 
-// Escape HTML helper (if not already defined)
+// ─── Utilities ─────────────────────────────────────────────────────────────
+
 if (typeof escapeHtml !== 'function') {
     window.escapeHtml = function(text) {
         const div = document.createElement('div');
@@ -3940,11 +3963,11 @@ if (typeof escapeHtml !== 'function') {
     };
 }
 
-// Make toggleMobileSidebar globally accessible
+// ─── Global API (used by HTML onclick handlers) ────────────────────────────
+
 window.toggleMobileSidebar = toggleMobileSidebar;
 window.submitAskUserResponse = submitAskUserResponse;
 
-// ─── App Namespace (used by new HTML onclick handlers) ─────────────────────
 window.App = {
     toggleSidebar: toggleMobileSidebar,
     closeSettings() {
