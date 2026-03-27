@@ -51,8 +51,6 @@ def _strip_thinking(text: str) -> str:
 async def simple_node(state: AgentState) -> AgentState:
     memory_context = state.get("memory_context", "None")
     style_hint = style_instruction_for_prompt(state.get("response_style"))
-    small_llm = await get_small_llm()
-    chat_llm = small_llm.bind(temperature=0.35, max_tokens=384)
     system = SystemMessage(
         content=SIMPLE_PROMPT.format(
             memory_context=memory_context,
@@ -60,9 +58,25 @@ async def simple_node(state: AgentState) -> AgentState:
         )
     )
     prompt_messages = with_system_for_local_server(system, list(state["messages"]))
-    response = await chat_llm.ainvoke(prompt_messages)
-    content = _strip_thinking(response.content or "")
+
+    # Try small model first, fall back to large if it crashes (segfault/channel error)
+    try:
+        small_llm = await get_small_llm()
+        chat_llm = small_llm.bind(temperature=0.35, max_tokens=384)
+        response = await chat_llm.ainvoke(prompt_messages)
+        content = _strip_thinking(response.content or "")
+        model = "small"
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"[simple] Small model failed ({e}), falling back to large")
+        from src.agent.llm import get_large_llm
+        large_llm = await get_large_llm()
+        chat_llm = large_llm.bind(temperature=0.35, max_tokens=384)
+        response = await chat_llm.ainvoke(prompt_messages)
+        content = _strip_thinking(response.content or "")
+        model = "large"
+
     return {
         "messages": [AIMessage(content=content)],
-        "model_used": "small"
+        "model_used": model
     }
