@@ -1075,18 +1075,72 @@ async function refreshSidebarRecents(projectId) {
 }
 
 async function editProject(projectId, currentName) {
-    const newName = await showCustomInput('Rename Project', 'Project Name', currentName);
-    if (!newName || newName === currentName) return;
-    
+    const project = cachedProjects.find(p => p.id === projectId);
+    const currentDesc = project?.instructions || '';
+
+    // Build a two-field modal using the existing customInputModal
+    const modal = document.getElementById('customInputModal');
+    const titleEl = document.getElementById('customInputTitle');
+    const labelEl = document.getElementById('customInputLabel');
+    const fieldEl = document.getElementById('customInputField');
+    const confirmBtn = document.getElementById('confirmCustomInputBtn');
+    const cancelBtn = document.getElementById('cancelCustomInputBtn');
+    const closeBtn = document.getElementById('closeCustomInputBtn');
+    if (!modal || !fieldEl) return;
+
+    titleEl.textContent = 'Edit Project';
+
+    // Replace the single field with two fields
+    const formArea = fieldEl.parentElement;
+    const origHTML = formArea.innerHTML;
+    formArea.innerHTML = `
+        <div class="form-field" style="margin-bottom:0.75rem">
+            <label style="font-size:0.75rem;color:var(--text-muted)">Project Name</label>
+            <input id="_editProjName" type="text" value="${DOMPurify.sanitize(currentName)}" style="margin-top:0.25rem">
+        </div>
+        <div class="form-field">
+            <label style="font-size:0.75rem;color:var(--text-muted)">Description</label>
+            <textarea id="_editProjDesc" rows="3" style="margin-top:0.25rem;resize:vertical">${DOMPurify.sanitize(currentDesc)}</textarea>
+        </div>
+    `;
+    if (labelEl) labelEl.style.display = 'none';
+
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+    document.getElementById('_editProjName')?.focus();
+
+    const result = await new Promise(resolve => {
+        const cleanup = (val) => {
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+            formArea.innerHTML = origHTML;
+            if (labelEl) labelEl.style.display = '';
+            confirmBtn.onclick = null;
+            cancelBtn.onclick = null;
+            if (closeBtn) closeBtn.onclick = null;
+            resolve(val);
+        };
+        confirmBtn.onclick = () => {
+            const name = document.getElementById('_editProjName')?.value?.trim();
+            const desc = document.getElementById('_editProjDesc')?.value?.trim();
+            cleanup({ name, desc });
+        };
+        cancelBtn.onclick = () => cleanup(null);
+        if (closeBtn) closeBtn.onclick = () => cleanup(null);
+    });
+
+    if (!result || !result.name) return;
+
     try {
         await fetch(`${API_BASE}/api/projects/${projectId}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: newName })
+            body: JSON.stringify({ name: result.name, instructions: result.desc || '' })
         });
         loadProjects();
+        if (currentView === 'projects') loadProjectsGrid();
     } catch (e) {
-        console.error('Failed to rename project:', e);
+        console.error('Failed to update project:', e);
     }
 }
 
