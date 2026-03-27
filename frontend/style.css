@@ -499,7 +499,7 @@ input[type="range"] { accent-color: var(--accent); height: 6px; }
   position: relative; z-index: 1; width: 100%; max-width: 560px;
   background: rgba(18,27,48,0.95); border: 1px solid rgba(255,255,255,0.1);
   border-radius: var(--radius-lg); overflow: hidden; box-shadow: 0 24px 48px rgba(0,0,0,0.5);
-  margin-top: 12vh;
+  margin-top: 6vh;
 }
 .spotlight-input-row { display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 1rem; border-bottom: 1px solid rgba(255,255,255,0.1); }
 .spotlight-input-row input { flex: 1; background: transparent !important; border: none; font-size: 1rem; }
