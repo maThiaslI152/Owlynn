@@ -3697,31 +3697,12 @@ async function openProjectDetail(projectId) {
     };
     document.getElementById('projectEditInstructions').onclick = () => editProjectInstructions(projectId, project.instructions);
     document.getElementById('projectUploadFile').onclick = () => {
-        switchProject(projectId, false);
-        document.getElementById('workspaceFileInput')?.click();
-    };
-
-    // Drag-drop on the entire project detail view
-    const dropZone = document.getElementById('projectDropZone');
-    const detailView = document.getElementById('view-project-detail');
-    if (dropZone && detailView) {
-        let dragCounter = 0;
-        detailView.addEventListener('dragenter', (e) => {
-            e.preventDefault();
-            dragCounter++;
-            dropZone.classList.remove('hidden');
-        });
-        detailView.addEventListener('dragover', (e) => { e.preventDefault(); });
-        detailView.addEventListener('dragleave', (e) => {
-            e.preventDefault();
-            dragCounter--;
-            if (dragCounter <= 0) { dragCounter = 0; dropZone.classList.add('hidden'); }
-        });
-        detailView.addEventListener('drop', async (e) => {
-            e.preventDefault();
-            dragCounter = 0;
-            dropZone.classList.add('hidden');
-            const files = e.dataTransfer?.files;
+        const input = document.getElementById('workspaceFileInput');
+        if (!input) return;
+        // One-time listener for this upload
+        const handler = async () => {
+            input.removeEventListener('change', handler);
+            const files = input.files;
             if (!files?.length) return;
             for (const file of files) {
                 const formData = new FormData();
@@ -3730,11 +3711,60 @@ async function openProjectDetail(projectId) {
                     await fetch(`${API_BASE}/api/upload?sub_path=&project_id=${projectId}`, { method: 'POST', body: formData });
                 } catch (_) {}
             }
-            await loadProjects();
-            openProjectDetail(projectId);
-        });
+            input.value = '';
+            // Wait for file processor then refresh
+            setTimeout(() => openProjectDetail(projectId), 2000);
+        };
+        input.addEventListener('change', handler);
+        input.click();
+    };
+
+    // Drag-drop on the entire project detail view
+    const dropZone = document.getElementById('projectDropZone');
+    const detailView = document.getElementById('view-project-detail');
+    if (dropZone && detailView) {
+        // Ensure hidden on open
+        dropZone.classList.add('hidden');
+
+        // Remove old listeners by cloning (prevents stacking)
+        if (detailView._dragSetup) {
+            // Already set up from a previous call — just ensure hidden
+        } else {
+            detailView._dragSetup = true;
+            let dragCounter = 0;
+            detailView.addEventListener('dragenter', (e) => {
+                e.preventDefault();
+                dragCounter++;
+                if (dragCounter === 1) dropZone.classList.remove('hidden');
+            });
+            detailView.addEventListener('dragover', (e) => { e.preventDefault(); });
+            detailView.addEventListener('dragleave', (e) => {
+                e.preventDefault();
+                dragCounter--;
+                if (dragCounter <= 0) { dragCounter = 0; dropZone.classList.add('hidden'); }
+            });
+            detailView.addEventListener('drop', async (e) => {
+                e.preventDefault();
+                dragCounter = 0;
+                dropZone.classList.add('hidden');
+                const files = e.dataTransfer?.files;
+                if (!files?.length) return;
+                const pid = detailView._currentProjectId;
+                if (!pid) return;
+                for (const file of files) {
+                    const formData = new FormData();
+                    formData.append('file', file);
+                    try {
+                        await fetch(`${API_BASE}/api/upload?sub_path=&project_id=${pid}`, { method: 'POST', body: formData });
+                    } catch (_) {}
+                }
+                setTimeout(() => openProjectDetail(pid), 2000);
+            });
+        }
+        detailView._currentProjectId = projectId;
+
         dropZone.onclick = () => {
-            document.getElementById('workspaceFileInput')?.click();
+            document.getElementById('projectUploadFile')?.click();
         };
     }
 
@@ -3776,24 +3806,37 @@ function openProjectFileViewer(projectId, filename, ext) {
         contentEl.innerHTML = `<iframe src="${rawUrl}"></iframe>`;
     } else if (['png','jpg','jpeg','gif','svg','webp'].includes(ext)) {
         contentEl.innerHTML = `<img src="${rawUrl}" alt="${filename}">`;
-    } else {
-        // For docx, xlsx, pptx and other processed formats, use read_workspace_file
-        // which checks .processed/ cache first
-        const readUrl = `${API_BASE}/api/files/${encodeURIComponent(filename)}?sub_path=&project_id=${projectId}&mode=text`;
-        fetch(readUrl).then(r => {
-            if (!r.ok) throw new Error('not found');
-            return r.text();
-        }).then(text => {
-            // Render as markdown if it looks like it
-            if (text.startsWith('#') || text.includes('\n## ') || text.includes('\n- ')) {
-                contentEl.innerHTML = `<div class="message-content">${marked.parse(DOMPurify.sanitize(text))}</div>`;
-            } else {
-                contentEl.innerHTML = `<pre>${escapeHtml(text)}</pre>`;
-            }
+    } else if (['docx','doc'].includes(ext) && typeof mammoth !== 'undefined') {
+        // Render docx as HTML using mammoth.js
+        fetch(rawUrl).then(r => r.arrayBuffer()).then(buffer => {
+            mammoth.convertToHtml({ arrayBuffer: buffer }).then(result => {
+                contentEl.innerHTML = `<div class="message-content" style="padding:0.5rem">${DOMPurify.sanitize(result.value)}</div>`;
+            }).catch(() => {
+                // Fallback to processed text
+                loadProcessedText(contentEl, rawUrl, filename, projectId);
+            });
         }).catch(() => {
-            contentEl.innerHTML = '<p class="empty-hint">Could not load file content.</p>';
+            contentEl.innerHTML = '<p class="empty-hint">Could not load file.</p>';
         });
+    } else {
+        loadProcessedText(contentEl, rawUrl, filename, projectId);
     }
+}
+
+function loadProcessedText(contentEl, rawUrl, filename, projectId) {
+    const textUrl = `${API_BASE}/api/files/${encodeURIComponent(filename)}?sub_path=&project_id=${projectId}&mode=text`;
+    fetch(textUrl).then(r => {
+        if (!r.ok) throw new Error('not found');
+        return r.text();
+    }).then(text => {
+        if (text.startsWith('#') || text.includes('\n## ') || text.includes('\n- ')) {
+            contentEl.innerHTML = `<div class="message-content">${marked.parse(DOMPurify.sanitize(text))}</div>`;
+        } else {
+            contentEl.innerHTML = `<pre>${escapeHtml(text)}</pre>`;
+        }
+    }).catch(() => {
+        contentEl.innerHTML = '<p class="empty-hint">Could not load file content.</p>';
+    });
 }
 
 async function renameProjectFile(projectId, oldName) {
