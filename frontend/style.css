@@ -585,23 +585,39 @@ input[type="range"] { accent-color: var(--accent); height: 6px; }
 .tool-output-details summary { cursor: pointer; font-size: 0.75rem; font-weight: 600; color: var(--text-muted); }
 .tool-output-details summary:hover { color: var(--text); }
 
-/* ─── Project Inspector ─── */
-.projects-layout { display: flex; gap: 1.5rem; }
-.projects-layout .grid-container { flex: 1; }
-.project-inspector {
-  width: 280px; flex-shrink: 0; padding: 1rem; border: 1px solid var(--border);
-  border-radius: var(--radius); background: var(--surface); position: sticky; top: 0; align-self: flex-start;
+/* ─── Projects Page ─── */
+.projects-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
+.projects-header h2 { font-size: 1.5rem; font-weight: 700; }
+.projects-search-bar {
+  display: flex; align-items: center; gap: 0.5rem; width: 100%;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 0.6rem 1rem; margin-bottom: 1.25rem; transition: border-color var(--transition);
 }
-.inspector-title { font-size: 1rem; font-weight: 600; margin-bottom: 0.5rem; }
-.inspector-desc { font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.75rem; }
-.inspector-meta { font-size: 0.75rem; color: var(--text-muted); }
-.inspector-bar { height: 4px; background: var(--border); border-radius: 2px; margin: 0.35rem 0; overflow: hidden; }
-.inspector-bar > div { height: 100%; background: var(--accent); border-radius: 2px; width: 0%; transition: width 0.3s ease; }
+.projects-search-bar:focus-within { border-color: var(--accent); }
+.projects-search-bar input { flex: 1; background: transparent !important; border: none; font-size: 0.95rem; }
+.projects-search-bar svg { color: var(--text-muted); flex-shrink: 0; }
 
-@media (max-width: 768px) {
-  .projects-layout { flex-direction: column; }
-  .project-inspector { width: 100%; position: static; }
+.projects-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; }
+
+.project-card {
+  padding: 1rem 1.25rem; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--surface); cursor: pointer; transition: border-color var(--transition);
+  position: relative;
 }
+.project-card:hover { border-color: var(--text-muted); }
+.project-card.pinned { border-color: var(--accent); }
+.project-card-name { font-size: 0.95rem; font-weight: 600; margin-bottom: 0.35rem; color: var(--text); }
+.project-card-desc { font-size: 0.8rem; color: var(--text-muted); line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin-bottom: 0.5rem; }
+.project-card-meta { font-size: 0.7rem; color: var(--text-muted); }
+.project-card-menu {
+  position: absolute; top: 0.75rem; right: 0.75rem; opacity: 0;
+  width: 28px; height: 28px; border-radius: 4px; display: flex; align-items: center; justify-content: center;
+  font-size: 1rem; color: var(--text-muted); transition: opacity var(--transition), background var(--transition);
+}
+.project-card:hover .project-card-menu { opacity: 1; }
+.project-card-menu:hover { background: rgba(255,255,255,0.08); }
+
+@media (max-width: 640px) { .projects-grid { grid-template-columns: 1fr; } }
 
 /* ─── Tailwind Override: Force dark theme on dynamically created elements ─── */
 /* script.js uses bg-white, bg-gray-50, bg-gray-100 etc. on dynamic elements */

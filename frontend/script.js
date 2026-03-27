@@ -3461,36 +3461,84 @@ function applyProjectsFilter() {
     const container = document.getElementById('projectsGridContainer');
     if (!container) return;
     const q = normalizeText(document.getElementById('projectsSearchInput')?.value);
-    const filtered = cachedProjects.filter(p => {
-        return normalizeText(p.name).includes(q) || normalizeText(p.instructions).includes(q);
-    });
+    const filtered = cachedProjects.filter(p =>
+        p.id !== 'default' && (normalizeText(p.name).includes(q) || normalizeText(p.instructions).includes(q))
+    );
 
     container.innerHTML = '';
     if (filtered.length === 0) {
-        container.innerHTML = '<p class="text-xs text-gray-400">No projects match your search.</p>';
+        container.innerHTML = '<p class="empty-hint" style="padding:2rem;text-align:center">No projects yet. Click "+ New project" to create one.</p>';
         return;
     }
 
+    // Sort: pinned first, then by name
+    filtered.sort((a, b) => {
+        const ap = localStorage.getItem(`pinproj_${a.id}`) ? 1 : 0;
+        const bp = localStorage.getItem(`pinproj_${b.id}`) ? 1 : 0;
+        if (bp !== ap) return bp - ap;
+        return (a.name || '').localeCompare(b.name || '');
+    });
+
     filtered.forEach(p => {
+        const isPinned = Boolean(localStorage.getItem(`pinproj_${p.id}`));
+        const chatCount = (p.chats || []).length;
+        const lastChat = (p.chats || []).sort((a, b) => (b.created_at || 0) - (a.created_at || 0))[0];
+        const updatedText = lastChat ? `Updated ${_relativeTime(lastChat.created_at * 1000)}` : '';
+
         const card = document.createElement('div');
-        const isActive = p.id === activeProjectId && hasSelectedProject;
-        card.className = `p-4 bg-cloud border border-bordercolor rounded-xl hover:shadow-md transition-shadow cursor-pointer flex flex-col gap-1 ${isActive ? 'project-card-active' : ''}`;
-        card.onclick = () => {
+        card.className = `project-card${isPinned ? ' pinned' : ''}`;
+        card.innerHTML = `
+            <div class="project-card-name">${DOMPurify.sanitize(p.name)}</div>
+            <div class="project-card-desc">${DOMPurify.sanitize(p.instructions || 'No description')}</div>
+            <div class="project-card-meta">${updatedText}${chatCount ? ' · ' + chatCount + ' chats' : ''}</div>
+            <button class="project-card-menu" title="More">···</button>
+        `;
+        card.onclick = (e) => {
+            if (e.target.closest('.project-card-menu')) return;
             switchProject(p.id);
             switchView('chat');
         };
-        card.onmouseenter = () => renderProjectInspector(p);
-        card.onmouseleave = () => renderProjectInspector(cachedProjects.find((project) => project.id === activeProjectId) || null);
-        card.innerHTML = `
-            <h3 class="font-semibold text-sm text-textdark">${DOMPurify.sanitize(p.name)}</h3>
-            <p class="text-xs text-gray-500">${DOMPurify.sanitize(p.instructions || 'No description')}</p>
-            <div class="mt-2 flex items-center justify-between text-[10px] text-gray-400 border-t pt-2 border-bordercolor">
-                <span>${p.chats ? p.chats.length : 0} chats</span>
-                <span>${p.files ? p.files.length : 0} files</span>
-            </div>
-        `;
+        card.querySelector('.project-card-menu').onclick = (e) => {
+            e.stopPropagation();
+            showProjectContextMenu(e, p, isPinned);
+        };
         container.appendChild(card);
     });
+}
+
+function showProjectContextMenu(event, project, isPinned) {
+    document.getElementById('sidebarCtxMenu')?.remove();
+    const menu = document.createElement('div');
+    menu.id = 'sidebarCtxMenu';
+    menu.className = 'sidebar-context-menu';
+    menu.innerHTML = `
+        <button class="ctx-item" data-action="pin">${isPinned ? 'Unpin' : 'Pin'}</button>
+        <button class="ctx-item" data-action="edit">Edit details</button>
+        <div class="ctx-divider"></div>
+        <button class="ctx-item danger" data-action="delete">Delete</button>
+    `;
+    const rect = event.target.getBoundingClientRect();
+    menu.style.top = `${rect.bottom + 4}px`;
+    menu.style.left = `${Math.min(rect.left, window.innerWidth - 180)}px`;
+    document.body.appendChild(menu);
+
+    menu.addEventListener('click', async (e) => {
+        const action = e.target.dataset.action;
+        menu.remove();
+        if (action === 'pin') {
+            if (isPinned) localStorage.removeItem(`pinproj_${project.id}`);
+            else localStorage.setItem(`pinproj_${project.id}`, '1');
+            applyProjectsFilter();
+        } else if (action === 'edit') {
+            editProject(project.id, project.name);
+        } else if (action === 'delete') {
+            deleteProject(project.id, project.name);
+        }
+    });
+    setTimeout(() => {
+        const closer = (e) => { if (!menu.contains(e.target)) { menu.remove(); document.removeEventListener('click', closer); } };
+        document.addEventListener('click', closer);
+    }, 10);
 }
 
 function applyArtifactsFilter() {
