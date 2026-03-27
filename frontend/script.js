@@ -3637,16 +3637,30 @@ function openProjectDetail(projectId) {
         }
     }
 
-    // Render files
+    // Render files from workspace directory (not just project metadata)
     const filesEl = document.getElementById('projectDetailFiles');
     if (filesEl) {
-        const files = project.files || [];
-        if (files.length === 0) {
-            filesEl.innerHTML = '<p class="empty-hint">No files uploaded.</p>';
-        } else {
-            filesEl.innerHTML = files.map(f =>
-                `<div style="padding:0.4rem 0;border-bottom:1px solid var(--border);color:var(--text)">${DOMPurify.sanitize(f.name || 'file')}</div>`
-            ).join('');
+        try {
+            const res = await fetch(`${API_BASE}/api/files?sub_path=&project_id=${projectId}`);
+            const files = await res.json();
+            if (!files.length) {
+                filesEl.innerHTML = '<p class="empty-hint">No files uploaded.</p>';
+            } else {
+                filesEl.innerHTML = '';
+                files.forEach(f => {
+                    const item = document.createElement('div');
+                    item.style.cssText = 'padding:0.5rem 0;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between';
+                    const name = f.name || f;
+                    const size = f.size ? `${(f.size / 1024).toFixed(1)} KB` : '';
+                    item.innerHTML = `
+                        <span style="color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">${DOMPurify.sanitize(name)}</span>
+                        <span style="color:var(--text-muted);font-size:0.7rem;margin-left:0.5rem;flex-shrink:0">${size}</span>
+                    `;
+                    filesEl.appendChild(item);
+                });
+            }
+        } catch (_) {
+            filesEl.innerHTML = '<p class="empty-hint">Could not load files.</p>';
         }
     }
 
