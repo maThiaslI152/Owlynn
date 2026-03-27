@@ -3770,17 +3770,28 @@ function openProjectFileViewer(projectId, filename, ext) {
     viewer.classList.remove('hidden');
     contentEl.innerHTML = '<p class="empty-hint">Loading...</p>';
 
-    const url = `${API_BASE}/api/files/${encodeURIComponent(filename)}?sub_path=&project_id=${projectId}`;
+    const rawUrl = `${API_BASE}/api/files/${encodeURIComponent(filename)}?sub_path=&project_id=${projectId}`;
 
     if (ext === 'pdf') {
-        contentEl.innerHTML = `<iframe src="${url}"></iframe>`;
+        contentEl.innerHTML = `<iframe src="${rawUrl}"></iframe>`;
     } else if (['png','jpg','jpeg','gif','svg','webp'].includes(ext)) {
-        contentEl.innerHTML = `<img src="${url}" alt="${filename}">`;
+        contentEl.innerHTML = `<img src="${rawUrl}" alt="${filename}">`;
     } else {
-        fetch(url).then(r => r.text()).then(text => {
-            contentEl.innerHTML = `<pre>${escapeHtml(text)}</pre>`;
+        // For docx, xlsx, pptx and other processed formats, use read_workspace_file
+        // which checks .processed/ cache first
+        const readUrl = `${API_BASE}/api/files/${encodeURIComponent(filename)}?sub_path=&project_id=${projectId}&mode=text`;
+        fetch(readUrl).then(r => {
+            if (!r.ok) throw new Error('not found');
+            return r.text();
+        }).then(text => {
+            // Render as markdown if it looks like it
+            if (text.startsWith('#') || text.includes('\n## ') || text.includes('\n- ')) {
+                contentEl.innerHTML = `<div class="message-content">${marked.parse(DOMPurify.sanitize(text))}</div>`;
+            } else {
+                contentEl.innerHTML = `<pre>${escapeHtml(text)}</pre>`;
+            }
         }).catch(() => {
-            contentEl.innerHTML = '<p class="empty-hint">Could not load file.</p>';
+            contentEl.innerHTML = '<p class="empty-hint">Could not load file content.</p>';
         });
     }
 }

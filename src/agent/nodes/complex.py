@@ -10,6 +10,49 @@ from src.agent.response_styles import style_instruction_for_prompt
 from src.agent.tool_sets import COMPLEX_TOOLS_NO_WEB, COMPLEX_TOOLS_WITH_WEB
 from src.agent.lm_studio_compat import with_system_for_local_server
 
+# Context window for the large model (Qwen3.5 9B in LM Studio)
+_LARGE_CONTEXT_WINDOW = 16384
+# Minimum output tokens — if less than this is available, we still try
+_MIN_OUTPUT_TOKENS = 512
+# Safety margin to avoid hitting the exact limit
+_CONTEXT_SAFETY_MARGIN = 256
+
+
+def _estimate_message_tokens(messages: list) -> int:
+    """
+    Estimate token count for a list of LangChain messages.
+    Uses a rough heuristic: ~4 chars per token for English/code,
+    ~2 chars per token for Thai/CJK.  Good enough for budget capping
+    without needing a real tokenizer (which would add latency).
+    """
+    total_chars = 0
+    for msg in messages:
+        content = getattr(msg, "content", None) or ""
+        if isinstance(content, list):
+            for block in content:
+                if isinstance(block, str):
+                    total_chars += len(block)
+                elif isinstance(block, dict):
+                    total_chars += len(str(block.get("text", "")))
+        else:
+            total_chars += len(str(content))
+        # Overhead per message (role tokens, formatting)
+        total_chars += 20
+
+    # Heuristic: average ~3.5 chars per token (blend of English and Thai)
+    return int(total_chars / 3.5)
+
+
+def _cap_budget_to_context(prompt_messages: list, requested_budget: int) -> int:
+    """
+    Given the assembled prompt and a requested output budget, cap it so that
+    input + output doesn't exceed the context window.
+    """
+    input_tokens = _estimate_message_tokens(prompt_messages)
+    available = _LARGE_CONTEXT_WINDOW - input_tokens - _CONTEXT_SAFETY_MARGIN
+    capped = max(min(requested_budget, available), _MIN_OUTPUT_TOKENS)
+    return capped
+
 
 def _strip_thinking_tags(text: str) -> str:
     """Remove <think>...</think> blocks from Qwen3.5 reasoning output."""
@@ -379,7 +422,7 @@ async def complex_llm_node(state: AgentState) -> AgentState:
 
     if mode == "tools_off":
         large_llm = await get_large_llm()
-        budget = state.get("token_budget") or 4096
+        budget = _cap_budget_to_context(prompt_messages, state.get("token_budget") or 4096)
         response = await large_llm.bind(max_tokens=budget).ainvoke(prompt_messages)
         return {
             "messages": [AIMessage(content=response.content)],
@@ -388,7 +431,7 @@ async def complex_llm_node(state: AgentState) -> AgentState:
         }
 
     tools = COMPLEX_TOOLS_WITH_WEB if web_on else COMPLEX_TOOLS_NO_WEB
-    budget = state.get("token_budget") or 4096
+    budget = _cap_budget_to_context(prompt_messages, state.get("token_budget") or 4096)
     large_llm = (await get_large_llm()).bind_tools(tools).bind(max_tokens=budget)
     response = await large_llm.ainvoke(prompt_messages)
     has_tool_calls = bool(getattr(response, "tool_calls", None))
@@ -416,7 +459,11 @@ async def complex_llm_node(state: AgentState) -> AgentState:
                 second_prompt = with_system_for_local_server(
                     system, thread_messages + [nudge]
                 )
-                response = await large_llm.ainvoke(second_prompt)
+                # Re-cap budget — the document content in the nudge may have
+                # consumed a large chunk of the context window.
+                recapped = _cap_budget_to_context(second_prompt, state.get("token_budget") or 4096)
+                large_llm_recapped = (await get_large_llm()).bind_tools(tools).bind(max_tokens=recapped)
+                response = await large_llm_recapped.ainvoke(second_prompt)
                 has_tool_calls = bool(getattr(response, "tool_calls", None))
                 if not has_tool_calls and not str(getattr(response, "content", "") or "").strip():
                     response = _fallback_for_blank_response(

@@ -493,9 +493,10 @@ async def api_list_files(sub_path: str = "", project_id: str = "default"):
         return {"status": "error", "message": str(e)}
 
 @app.get("/api/files/{filename}")
-async def api_get_file(filename: str, sub_path: str = "", project_id: str = "default"):
-    """Serve/View a file from the workspace."""
+async def api_get_file(filename: str, sub_path: str = "", project_id: str = "default", mode: str = ""):
+    """Serve/View a file from the workspace. mode=text returns processed text content."""
     import urllib.parse
+    from fastapi.responses import PlainTextResponse
     filename = urllib.parse.unquote(filename)
     sub_path = urllib.parse.unquote(sub_path)
     
@@ -509,6 +510,22 @@ async def api_get_file(filename: str, sub_path: str = "", project_id: str = "def
          return {"status": "error", "message": "Access denied"}
     if not os.path.exists(filepath):
          return {"status": "error", "message": "File not found"}
+
+    # Text mode: return processed/cached text content
+    if mode == "text":
+        processed_dir = os.path.join(os.path.abspath(WORKSPACE_DIR), ".processed")
+        for ext in [".txt", ".md"]:
+            cached = os.path.join(processed_dir, filename + ext)
+            if os.path.exists(cached):
+                with open(cached, "r", encoding="utf-8") as f:
+                    return PlainTextResponse(f.read())
+        # Fallback: try reading as text directly
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                return PlainTextResponse(f.read())
+        except Exception:
+            return PlainTextResponse("Could not read file as text.", status_code=400)
+
     return FileResponse(filepath)
 
 @app.delete("/api/files/{filename}")
