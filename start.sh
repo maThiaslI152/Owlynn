@@ -3,7 +3,7 @@
 # Starts all services, waits for readiness, launches the desktop app.
 # Ctrl+C gracefully shuts down the backend. Containers stay running.
 
-set -e
+set +e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
@@ -48,9 +48,14 @@ if ! podman ps &>/dev/null; then
     pkill -9 -f gvproxy 2>/dev/null || true
     sleep 1
     podman machine stop 2>/dev/null || true
-    podman machine start 2>/dev/null || fail "Could not start Podman machine"
+    podman machine start 2>/dev/null || { fail "Could not start Podman machine"; }
+    # Wait for socket to be ready
+    for i in $(seq 1 10); do
+        podman ps &>/dev/null && break
+        sleep 1
+    done
 fi
-ok "Podman machine running"
+podman ps &>/dev/null && ok "Podman machine running" || fail "Podman machine not usable"
 
 # ─── 2. Containers ───────────────────────────────────────────────────────────
 info "Checking containers..."

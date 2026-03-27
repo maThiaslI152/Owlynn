@@ -23,7 +23,7 @@ config = {
         "provider": "chroma",
         "config": {
             "host": "localhost",
-            "port": 8000,
+            "port": 8100,
             "collection_name": "cowork_memory_mE5",
         },
     },

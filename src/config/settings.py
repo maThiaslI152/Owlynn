@@ -34,7 +34,7 @@ PORT = 8000
 # External Services
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 CHROMADB_HOST = os.getenv("CHROMADB_HOST", "localhost")
-CHROMADB_PORT = int(os.getenv("CHROMADB_PORT", 8000))
+CHROMADB_PORT = int(os.getenv("CHROMADB_PORT", 8100))
 
 # MCP Settings
 MCP_CONFIG_PATH = PROJECT_ROOT / "mcp_config.json"
