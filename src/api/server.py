@@ -107,6 +107,10 @@ app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
 async def serve_script():
     return FileResponse(os.path.join(FRONTEND_DIR, "script.js"))
 
+@app.get("/style.css")
+async def serve_style():
+    return FileResponse(os.path.join(FRONTEND_DIR, "style.css"))
+
 # ─── REST API endpoints ──────────────────────────────────────────────────────
 
 @app.get("/api/profile")

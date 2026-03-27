@@ -3547,13 +3547,17 @@ async function openSearchModal() {
 function switchView(viewName) {
     currentView = viewName;
     
-    // Hide all views
-    document.querySelectorAll('.view-pane').forEach(p => p.classList.add('hidden'));
+    // Hide all views (support both old .view-pane and new .view classes)
+    document.querySelectorAll('.view-pane, .view').forEach(p => {
+        p.classList.add('hidden');
+        p.classList.remove('active');
+    });
     
     // Show target view
     const target = document.getElementById(`view-${viewName}`);
     if (target) {
         target.classList.remove('hidden');
+        target.classList.add('active');
         if (viewName === 'customize') target.classList.add('flex');
     }
     
@@ -3561,9 +3565,9 @@ function switchView(viewName) {
     document.querySelectorAll('.nav-item').forEach(item => {
         const itemView = item.getAttribute('data-view');
         if (itemView === viewName) {
-            item.classList.add('bg-gray-100', 'font-medium');
+            item.classList.add('bg-gray-100', 'font-medium', 'active');
         } else {
-            item.classList.remove('bg-gray-100', 'font-medium');
+            item.classList.remove('bg-gray-100', 'font-medium', 'active');
         }
     });
 
@@ -3889,22 +3893,21 @@ renderWelcomeRecents();
 
 // ─── Mobile Sidebar Toggle ─────────────────────────────────────────────────
 function toggleMobileSidebar(open) {
-    const sidebar = document.getElementById('sidebarEl');
+    const sidebar = document.getElementById('sidebar') || document.getElementById('sidebarEl');
     const overlay = document.getElementById('sidebarOverlay');
     if (!sidebar) return;
 
     if (open) {
-        sidebar.classList.add('sidebar-open');
+        sidebar.classList.add('open', 'sidebar-open');
         sidebar.classList.remove('hidden');
         sidebar.classList.add('flex');
         if (overlay) overlay.classList.add('active');
     } else {
-        sidebar.classList.remove('sidebar-open');
+        sidebar.classList.remove('open', 'sidebar-open');
         if (overlay) overlay.classList.remove('active');
-        // On mobile, re-hide after transition
         if (window.innerWidth < 768) {
             setTimeout(() => {
-                if (!sidebar.classList.contains('sidebar-open')) {
+                if (!sidebar.classList.contains('open') && !sidebar.classList.contains('sidebar-open')) {
                     sidebar.classList.add('hidden');
                     sidebar.classList.remove('flex');
                 }
@@ -3940,3 +3943,20 @@ if (typeof escapeHtml !== 'function') {
 // Make toggleMobileSidebar globally accessible
 window.toggleMobileSidebar = toggleMobileSidebar;
 window.submitAskUserResponse = submitAskUserResponse;
+
+// ─── App Namespace (used by new HTML onclick handlers) ─────────────────────
+window.App = {
+    toggleSidebar: toggleMobileSidebar,
+    closeSettings() {
+        const modal = document.getElementById('settingsModal');
+        if (modal) { modal.classList.add('hidden'); modal.classList.remove('flex'); }
+    },
+    closeFileViewer() {
+        const modal = document.getElementById('fileViewerModal');
+        if (modal) { modal.classList.add('hidden'); modal.classList.remove('flex'); }
+    },
+    closeSearch() {
+        const modal = document.getElementById('searchModal');
+        if (modal) { modal.classList.add('hidden'); modal.classList.remove('flex'); }
+    },
+};
