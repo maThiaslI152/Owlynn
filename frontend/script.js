@@ -988,91 +988,57 @@ async function deleteChat(chatId, chatName) {
 }
 
 async function maybeAutoNameCurrentChat(userText, fileNames = []) {
-    if (!userText || !userText.trim()) return;
+    if (!userText?.trim()) return;
     if (!isUntitledName(currentChatName)) return;
     if (titleGenerationInFlight) return;
-
     titleGenerationInFlight = true;
 
     try {
         await ensureChatRegistered();
-
         const projectId = getChatProjectId();
-        const payloadFiles = (fileNames || []).map((n) => ({ name: n }));
 
-        const res = await fetch(API_BASE + '/api/chats/generate-title', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                message: userText,
-                files: payloadFiles
-            })
-        });
+        // Ask small LLM for a title
+        let title = '';
+        try {
+            const res = await fetch(API_BASE + '/api/chats/generate-title', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message: userText, files: fileNames.map(n => ({ name: n })) })
+            });
+            const data = await res.json();
+            title = (data?.title || '').trim().replace(/\s+/g, ' ').slice(0, 60);
+        } catch (_) {}
 
-        const data = await res.json();
-        const suggested = data?.title ? String(data.title).trim() : '';
-        const nextName = suggested || deriveChatTitle(userText);
+        // Fallback to local heuristic
+        if (!title) title = deriveChatTitle(userText);
+        if (!title) return;
 
-        const finalName = nextName ? String(nextName).replace(/\s+/g, ' ').trim().slice(0, 60) : '';
-        if (!finalName) return;
-
+        // Save the title
         await fetch(`${API_BASE}/api/projects/${projectId}/chats/${currentSessionId}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: finalName })
+            body: JSON.stringify({ name: title })
         });
+        currentChatName = title;
 
-        currentChatName = finalName;
-
-        // Refresh project data so recents reflect the new chat title.
-        const projectRes = await fetch(`${API_BASE}/api/projects/${projectId}`);
-        const project = await projectRes.json();
-        cachedProjects = cachedProjects.map((p) => (p.id === projectId ? project : p));
-
-        const sidebarProjectId = getEffectiveProjectId();
-        if (sidebarProjectId === projectId) {
-            renderProjectChats(project.chats || []);
-            renderProjectInspector(project);
-        }
-        renderWelcomeRecents();
-
-        if (currentView === 'chats' && sidebarProjectId === projectId) {
-            await loadChatsList();
-        }
+        // Refresh sidebar
+        await refreshSidebarRecents(projectId);
     } catch (e) {
-        console.error('Failed to generate auto-title via router LLM:', e);
-        // Best-effort fallback: local heuristic rename
-        try {
-            const fallbackName = deriveChatTitle(userText);
-            if (!fallbackName) return;
-            const projectId = getChatProjectId();
-            await fetch(`${API_BASE}/api/projects/${projectId}/chats/${currentSessionId}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name: fallbackName })
-            });
-            currentChatName = fallbackName;
-            // Refresh cached project data so all recents surfaces show the title.
-            const projectRes = await fetch(`${API_BASE}/api/projects/${projectId}`);
-            const project = await projectRes.json();
-            cachedProjects = cachedProjects.map((p) => (p.id === projectId ? project : p));
-
-            const sidebarProjectId = getEffectiveProjectId();
-            if (sidebarProjectId === projectId) {
-                renderProjectChats(project.chats || []);
-                renderProjectInspector(project);
-            }
-            renderWelcomeRecents();
-
-            if (currentView === 'chats' && sidebarProjectId === projectId) {
-                await loadChatsList();
-            }
-        } catch (_) {
-            // ignore fallback failures
-        }
+        console.error('Auto-name failed:', e);
     } finally {
         titleGenerationInFlight = false;
     }
+}
+
+async function refreshSidebarRecents(projectId) {
+    try {
+        const res = await fetch(`${API_BASE}/api/projects/${projectId || getEffectiveProjectId()}`);
+        const project = await res.json();
+        cachedProjects = cachedProjects.map(p => p.id === project.id ? project : p);
+        if (getEffectiveProjectId() === project.id) {
+            renderProjectChats(project.chats || []);
+        }
+    } catch (_) {}
 }
 
 async function editProject(projectId, currentName) {
