@@ -51,6 +51,7 @@ echo "✅ LM Studio verified."
 # 3. Start FastAPI Backend in background
 echo "-> Starting Backend..."
 export PYTHONPATH=$PYTHONPATH:$(pwd)
+export SEARXNG_URL=http://localhost:8888
 source .venv/bin/activate
 
 # Be robust: kill any old instance listening on 8000
