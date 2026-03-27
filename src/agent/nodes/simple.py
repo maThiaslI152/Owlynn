@@ -1,82 +1,77 @@
-from langchain_core.messages import SystemMessage, AIMessage
-from src.agent.state import AgentState
+"""
+Simple Node — Fast answers via the small LLM (LFM2.5-1.2B or similar).
+
+Handles greetings, small talk, and direct knowledge questions.
+No tools, no memory injection (keeps the prompt short for small models).
+Falls back to the large model if the small one fails.
+"""
+
+import logging
+import re
+
+from langchain_core.messages import AIMessage, SystemMessage
 from src.agent.llm import get_small_llm
 from src.agent.response_styles import style_instruction_for_prompt
 from src.agent.lm_studio_compat import with_system_for_local_server
-import re
+from src.agent.state import AgentState
 
-SIMPLE_PROMPT = """You are a quick, plain assistant. Answer in as few words as fit: usually 1–3 short sentences unless the user clearly wants detail. No tools. No chain-of-thought, no "let me think", no meta commentary.
-Memory context (use only if relevant):
-{memory_context}{style_hint}"""
+logger = logging.getLogger(__name__)
 
-def _strip_thinking(text: str) -> str:
-    """Remove thinking/reasoning blocks from model output."""
+SIMPLE_PROMPT = (
+    "You are Owlynn, a helpful assistant. "
+    "Give short, direct answers (1-3 sentences). "
+    "No reasoning steps, no preamble, no meta commentary."
+    "{style_hint}"
+)
+
+
+def _clean_response(text: str) -> str:
+    """Strip thinking tokens and reasoning artifacts from small model output."""
     if not text:
-        return text
-    # Strip <think>...</think> blocks (Qwen3.5 reasoning format)
-    cleaned = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
-    # Strip numbered reasoning steps (abliterated model style)
-    # Look for the actual answer after reasoning — usually after a line like "Hi Tim..."
-    # or after the last numbered step
-    lines = cleaned.split('\n')
-    # Find the last line that looks like an actual response (not a reasoning step)
-    answer_lines = []
-    in_reasoning = False
+        return ""
+    # Remove <think>...</think> blocks
+    out = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+    # Remove numbered reasoning steps (e.g. "1. **Analyze**...")
+    lines = out.split("\n")
+    kept: list[str] = []
+    skip = False
     for line in lines:
-        stripped = line.strip()
-        # Skip reasoning markers
-        if re.match(r'^\d+\.\s+\*\*', stripped) or re.match(r'^\s+\*\s+', stripped):
-            in_reasoning = True
+        s = line.strip()
+        if re.match(r"^\d+\.\s+\*\*", s) or s.startswith("Thinking Process:"):
+            skip = True
             continue
-        if stripped.startswith('Thinking Process:') or stripped.startswith('Reasoning:'):
-            in_reasoning = True
+        if skip and not s:
             continue
-        if stripped.startswith('Analysis:') or stripped.startswith('Step '):
-            in_reasoning = True
-            continue
-        if not stripped:
-            if in_reasoning:
-                continue
-        if stripped and not stripped.startswith('*'):
-            in_reasoning = False
-            answer_lines.append(line)
-    result = '\n'.join(answer_lines).strip()
-    # If we stripped everything, try extracting quoted content from reasoning
+        if s and not s.startswith("*   "):
+            skip = False
+            kept.append(line)
+    result = "\n".join(kept).strip()
     if not result:
-        quotes = re.findall(r'"([^"]{5,})"', cleaned)
-        if quotes:
-            result = quotes[-1]
-    return result if result else text
+        # Fallback: extract quoted strings from reasoning
+        quotes = re.findall(r'"([^"]{5,})"', out)
+        result = quotes[-1] if quotes else out
+    return result or text
+
 
 async def simple_node(state: AgentState) -> AgentState:
-    memory_context = state.get("memory_context", "None")
+    """Fast-path node: short answers without tools."""
     style_hint = style_instruction_for_prompt(state.get("response_style"))
-    system = SystemMessage(
-        content=SIMPLE_PROMPT.format(
-            memory_context=memory_context,
-            style_hint=style_hint,
-        )
-    )
-    prompt_messages = with_system_for_local_server(system, list(state["messages"]))
+    system = SystemMessage(content=SIMPLE_PROMPT.format(style_hint=style_hint))
+    messages = list(state.get("messages") or [])
+    prompt = with_system_for_local_server(system, messages)
 
-    # Try small model first, fall back to large if it crashes (segfault/channel error)
+    # Try small model, fall back to large on failure
     try:
-        small_llm = await get_small_llm()
-        chat_llm = small_llm.bind(temperature=0.35, max_tokens=384)
-        response = await chat_llm.ainvoke(prompt_messages)
-        content = _strip_thinking(response.content or "")
+        llm = await get_small_llm()
+        response = await llm.bind(temperature=0.4, max_tokens=512).ainvoke(prompt)
+        content = _clean_response(response.content or "")
         model = "small"
     except Exception as e:
-        import logging
-        logging.getLogger(__name__).warning(f"[simple] Small model failed ({e}), falling back to large")
+        logger.warning("[simple] Small model failed (%s), falling back to large", e)
         from src.agent.llm import get_large_llm
-        large_llm = await get_large_llm()
-        chat_llm = large_llm.bind(temperature=0.35, max_tokens=384)
-        response = await chat_llm.ainvoke(prompt_messages)
-        content = _strip_thinking(response.content or "")
+        llm = await get_large_llm()
+        response = await llm.bind(temperature=0.4, max_tokens=512).ainvoke(prompt)
+        content = _clean_response(response.content or "")
         model = "large"
 
-    return {
-        "messages": [AIMessage(content=content)],
-        "model_used": model
-    }
+    return {"messages": [AIMessage(content=content)], "model_used": model}
