@@ -467,7 +467,7 @@ input[type="range"] { accent-color: var(--accent); height: 6px; }
 /* ─── Modals ─── */
 .modal { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; padding: 1rem; }
 .modal.hidden { display: none; }
-.modal-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,0.5); backdrop-filter: blur(2px); }
+.modal-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,0.5); }
 .modal-dialog { position: relative; z-index: 1; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); width: 100%; overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 24px 48px rgba(0,0,0,0.4); }
 .modal-sm { max-width: 400px; padding: 1.5rem; }
 .modal-lg { max-width: 640px; max-height: 85vh; }
