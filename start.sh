@@ -76,9 +76,11 @@ if ! command -v podman &>/dev/null; then
 fi
 
 # Check if machine is running, start if not
-if ! podman info &>/dev/null; then
-    info "Podman machine not running, starting..."
+if ! podman ps &>/dev/null; then
+    info "Podman machine not responding, starting..."
     pkill -9 -f gvproxy 2>/dev/null || true
+    sleep 1
+    podman machine stop 2>/dev/null || true
     podman machine start 2>/dev/null || {
         warn "Podman machine start failed, trying init + start"
         podman machine init 2>/dev/null || true
@@ -91,6 +93,9 @@ ok "Podman machine running"
 info "Starting containers..."
 if podman compose up -d 2>/dev/null || podman-compose up -d 2>/dev/null; then
     PODMAN_STARTED=true
+    # Wait for containers to be ready
+    info "Waiting for containers to initialize..."
+    sleep 5
     ok "Containers started (Redis, ChromaDB, SearXNG)"
 else
     warn "Container start failed — app will work without Redis/ChromaDB"
