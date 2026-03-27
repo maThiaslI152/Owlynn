@@ -35,20 +35,32 @@ from ..memory.persona import get_persona, update_persona_field
 from ..memory.project import project_manager
 from ..memory.long_term import memory as long_term_memory
 from .mcp_client import get_mcp_tools
+from ..config.settings import WORKSPACE_DIR as _WORKSPACE_PATH
+from .workspace_context import tool_workspace_root
 
-# Initialize the global sandbox instance
-# Assuming the script is run from the project root (/Users/tim/Documents/Owlynn)
-WORKSPACE_DIR = os.path.abspath(os.path.join(os.getcwd(), "workspace"))
-sandbox = PodmanSandbox(workspace_path=WORKSPACE_DIR)
+# Whole workspace mount for the sandbox (includes workspace/projects/…)
+BASE_WORKSPACE_DIR = str(_WORKSPACE_PATH.resolve())
+sandbox = PodmanSandbox(workspace_path=BASE_WORKSPACE_DIR)
+
 
 def get_safe_workspace_path(filename: str) -> tuple[str, str | None]:
-    """Resolves path and checks if it stays inside WORKSPACE_DIR."""
+    """Resolve a user/model path inside the active project workspace or explicit projects/… path."""
     filename = filename.lstrip("/")
     if filename.startswith("workspace/"):
-        filename = filename[len("workspace/"):]
-    filepath = os.path.abspath(os.path.join(WORKSPACE_DIR, filename))
-    if not filepath.startswith(os.path.abspath(WORKSPACE_DIR)):
-         return "", "Error: Access denied. Path is outside workspace."
+        filename = filename[len("workspace/") :]
+
+    if filename.startswith("projects/"):
+        workspace_root = BASE_WORKSPACE_DIR
+    else:
+        workspace_root = tool_workspace_root()
+
+    filepath = os.path.abspath(os.path.join(workspace_root, filename))
+    root_abs = os.path.abspath(workspace_root)
+    base_abs = os.path.abspath(BASE_WORKSPACE_DIR)
+    if not filepath.startswith(root_abs):
+        return "", "Error: Access denied. Path is outside workspace."
+    if not filepath.startswith(base_abs):
+        return "", "Error: Access denied. Path is outside workspace."
     return filepath, None
 
 @tool
@@ -72,12 +84,13 @@ def read_workspace_file(filename: str) -> str:
         # Fuzzy match fallback for model typos or variations (e.g., stripped numbering)
         try:
             filename_only = os.path.basename(filepath)
-            all_files = os.listdir(WORKSPACE_DIR)
+            search_dir = os.path.dirname(filepath) or tool_workspace_root()
+            all_files = os.listdir(search_dir)
             # Find files where the requested name is a substring of the real file, or vice versa
             matches = [f for f in all_files if filename_only in f or f in filename_only]
             if matches:
                 # Use the first best match found
-                filepath = os.path.join(WORKSPACE_DIR, matches[0])
+                filepath = os.path.join(search_dir, matches[0])
                 print(f"[Workspace] Fuzzy matched '{filename_only}' to '{matches[0]}'")
             else:
                 return f"Error: File '{filename}' not found in workspace."
@@ -85,7 +98,7 @@ def read_workspace_file(filename: str) -> str:
             return f"Error: File '{filename}' not found in workspace."
 
     
-    processed_dir = os.path.join(WORKSPACE_DIR, ".processed")
+    processed_dir = os.path.join(BASE_WORKSPACE_DIR, ".processed")
     filename_only = os.path.basename(filepath)
     cached_txt = os.path.join(processed_dir, filename_only + ".txt")
     cached_md = os.path.join(processed_dir, filename_only + ".md")
@@ -181,15 +194,16 @@ def execute_python_code(code: str) -> str:
     """
     import uuid
     filename = f".temp_{uuid.uuid4().hex[:8]}.py"
-    filepath = os.path.join(WORKSPACE_DIR, filename)
+    filepath = os.path.join(tool_workspace_root(), filename)
     try:
         with open(filepath, 'w') as f:
             f.write(code)
+        rel = os.path.relpath(filepath, BASE_WORKSPACE_DIR)
     except Exception as e:
         return f"Error writing temporary python file: {str(e)}"
     
-    # Run the script in the sandbox
-    result = sandbox.execute_shell(f"python {filename}")
+    # Run the script in the sandbox (cwd is repo workspace root /workspace)
+    result = sandbox.execute_shell(f"python {shlex.quote(rel)}")
     
     # Clean up
     try:
@@ -305,7 +319,7 @@ def get_workspace_stats() -> str:
     total_files = 0
     total_size = 0
     
-    for root, dirs, files in os.walk(WORKSPACE_DIR):
+    for root, dirs, files in os.walk(BASE_WORKSPACE_DIR):
         # Skip hidden files/dirs
         files = [f for f in files if not f.startswith('.')]
         dirs[:] = [d for d in dirs if not d.startswith('.')]

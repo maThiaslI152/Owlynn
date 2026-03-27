@@ -88,8 +88,6 @@ def search_memories(query: str, top_k: int = 8) -> list[dict]:
     
     # Fallback: return most recent memories if no keyword match
     return recent_window[-top_k:] if recent_window else []
-    
-    return top[:top_k]
 
 
 def delete_memory(fact: str) -> bool:

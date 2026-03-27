@@ -7,7 +7,6 @@ mem0ai
 chromadb
 mlx-lm
 mcp
-streamlit
 langgraph-checkpoint-redis
 sentence-transformers
 fastapi

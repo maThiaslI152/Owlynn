@@ -1365,7 +1365,7 @@
     </div>
 
     <!-- Load external script to handle Websockets and UI interactions -->
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked@15.0.6/marked.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
@@ -1378,6 +1378,8 @@
         });
         
 
+        // Marked v9+ passes token objects (with .tokens / .rows), not pre-rendered strings.
+        // Old overrides that used { text } for table cells produced "[object Object]" and "undefined".
         marked.use({
             renderer: {
                 code({ text, lang, escaped }) {
@@ -1387,18 +1389,38 @@
                 codespan({ text }) {
                     return `<code class="bg-gray-100 text-gray-800 px-2 py-1 rounded text-sm font-mono">${text}</code>`;
                 },
-                table({ header, body }) {
-                    return `<table class="w-full border-collapse my-4 border border-gray-300"><thead class="bg-gray-100 border-b border-gray-300">${header}</thead><tbody>${body}</tbody></table>`;
+                table(token) {
+                    const hdr = token.header || [];
+                    const rows = token.rows || [];
+                    let cell = '';
+                    let headerRow = '';
+                    for (let j = 0; j < hdr.length; j++) {
+                        cell += this.tablecell(hdr[j]);
+                    }
+                    headerRow += this.tablerow({ text: cell });
+                    let body = '';
+                    for (let j = 0; j < rows.length; j++) {
+                        const row = rows[j] || [];
+                        cell = '';
+                        for (let k = 0; k < row.length; k++) {
+                            cell += this.tablecell(row[k]);
+                        }
+                        body += this.tablerow({ text: cell });
+                    }
+                    return `<table class="w-full border-collapse my-4 border border-gray-300"><thead class="bg-gray-100 border-b border-gray-300">${headerRow}</thead><tbody>${body}</tbody></table>\n`;
                 },
                 tablerow({ text }) {
-                    return `<tr class="border-b border-gray-200 hover:bg-gray-50">${text}</tr>`;
+                    return `<tr class="border-b border-gray-200 hover:bg-gray-50">${text}</tr>\n`;
                 },
-                tablecell({ text, flags }) {
-                    const tag = flags.header ? 'th' : 'td';
-                    return `<${tag} class="px-4 py-2 text-left">${text}</${tag}>`;
+                tablecell(token) {
+                    const content = this.parser.parseInline(token.tokens);
+                    const tag = token.header ? 'th' : 'td';
+                    const align = token.align ? ` align="${token.align}"` : '';
+                    return `<${tag} class="px-4 py-2 text-left"${align}>${content}</${tag}>\n`;
                 },
-                listitem({ text }) {
-                    return `<li class="ml-5 my-1">${text}</li>`;
+                listitem(item) {
+                    const body = this.parser.parse(item.tokens);
+                    return `<li class="ml-5 my-1">${body}</li>\n`;
                 }
             }
         });

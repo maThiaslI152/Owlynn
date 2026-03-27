@@ -2,7 +2,11 @@
 
 from langchain_core.messages import ToolMessage
 
-from src.agent.nodes.complex import _fallback_for_blank_response, build_fetch_retry_nudge_messages
+from src.agent.nodes.complex import (
+    _fallback_for_blank_response,
+    build_fetch_retry_nudge_messages,
+    build_web_search_answer_nudge_messages,
+)
 
 
 def _fetch_tool(content: str) -> ToolMessage:
@@ -51,6 +55,46 @@ def test_no_nudge_for_substantial_fetch_body():
     body = "📄 Content from https://example.com:\n\n" + ("paragraph\n" * 50)
     m = _fetch_tool(body)
     assert build_fetch_retry_nudge_messages([m]) == []
+
+
+def _web_search_ok(content: str) -> ToolMessage:
+    return ToolMessage(content=content, name="web_search", tool_call_id="tcw")
+
+
+def test_web_search_answer_nudge_when_hits_present():
+    body = (
+        '🔍 Web search results for: "EKS"\n\n'
+        "**1. What is EKS?**\n"
+        "   URL: https://docs.aws.amazon.com/eks/latest/userguide/what-is-eks.html\n"
+        "   Amazon EKS is managed Kubernetes.\n"
+    )
+    out = build_web_search_answer_nudge_messages([_web_search_ok(body)])
+    assert len(out) == 1
+    assert "must now write a complete answer" in out[0].content
+
+
+def test_web_search_answer_nudge_skipped_on_failure():
+    out = build_web_search_answer_nudge_messages(
+        [
+            _web_search_ok(
+                '[web_search] Unable to retrieve online results for "x".',
+            )
+        ]
+    )
+    assert out == []
+
+
+def test_blank_response_fallback_synthetic_when_web_search_succeeded():
+    body = (
+        '🔍 Web search results for: "aws eks"\n\n'
+        "**1. Title**\n"
+        "   URL: https://docs.aws.amazon.com/eks/\n"
+        "   Snippet.\n"
+    )
+    fb = _fallback_for_blank_response([_web_search_ok(body)], web_search_enabled=True)
+    assert "search payload directly" in fb.content or "🔍" in fb.content
+    assert "docs.aws.amazon.com" in fb.content
+    assert "empty response" not in fb.content
 
 
 def test_blank_response_fallback_when_web_search_failed():

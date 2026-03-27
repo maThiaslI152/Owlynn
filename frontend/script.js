@@ -161,11 +161,38 @@ function resetTransientExecutionUI() {
     liveToolCards.clear();
 }
 
-/** Keep streaming / final answer bubble after tool cards (tool_execution appends in between). */
+/**
+ * DOM anchor for streamed answer + live tool cards: keep tools above the answer and
+ * the answer above footer actions (copy/regenerate), not at the very end of the bubble.
+ */
+function getAgentAnswerAnchor(contentDiv) {
+    if (!contentDiv) return null;
+    return contentDiv.querySelector('.agent-final-answer')
+        || contentDiv.querySelector('.message-actions');
+}
+
+/** Insert a live tool card above the streamed/final answer (and above message actions). */
+function insertAgentToolCard(contentDiv, toolCard) {
+    if (!contentDiv || !toolCard) return;
+    const anchor = getAgentAnswerAnchor(contentDiv);
+    if (anchor) {
+        contentDiv.insertBefore(toolCard, anchor);
+    } else {
+        contentDiv.appendChild(toolCard);
+    }
+}
+
+/** Keep streamed final answer after tool cards but before .message-actions. */
 function moveActiveAnswerToEnd() {
     if (!activeAiMessage?.mainContainer || !activeAiMessage?.contentDiv) return;
     activeAiMessage.mainContainer.classList.add('agent-final-answer');
-    activeAiMessage.contentDiv.appendChild(activeAiMessage.mainContainer);
+    const cd = activeAiMessage.contentDiv;
+    const actions = cd.querySelector('.message-actions');
+    if (actions) {
+        cd.insertBefore(activeAiMessage.mainContainer, actions);
+    } else {
+        cd.appendChild(activeAiMessage.mainContainer);
+    }
 }
 
 // DOM Elements
@@ -1639,7 +1666,7 @@ function handleToolExecution(data) {
         const existingCard = liveToolCards.get(toolKey);
         existingCard.replaceWith(toolCard);
     } else {
-        contentDiv.appendChild(toolCard);
+        insertAgentToolCard(contentDiv, toolCard);
     }
     if (status === 'running') {
         liveToolCards.set(toolKey, toolCard);
@@ -1913,7 +1940,40 @@ function renderPreviews() {
     renderInto(welcomeAttachmentPreviews);
 }
 
+/**
+ * Flatten API/stream content (string | blocks | nested objects) to plain text for markdown.
+ * Avoids "[object Object]" when providers nest { text: { ... } } or table-like blocks.
+ */
+function flattenAiContentForUi(content) {
+    if (content == null || content === undefined) return '';
+    if (typeof content === 'string') return content;
+    if (typeof content === 'number' || typeof content === 'boolean') return String(content);
+    if (Array.isArray(content)) {
+        return content.map(flattenAiContentForUi).join('');
+    }
+    if (typeof content === 'object') {
+        if (content.text != null) return flattenAiContentForUi(content.text);
+        if (content.content != null) return flattenAiContentForUi(content.content);
+        if (content.delta != null) return flattenAiContentForUi(content.delta);
+        if (content.value != null) return flattenAiContentForUi(content.value);
+        const type = content.type;
+        if (type === 'text' && content.text != null) return flattenAiContentForUi(content.text);
+        try {
+            return JSON.stringify(content);
+        } catch (_) {
+            return '';
+        }
+    }
+    return '';
+}
+
+/** LLM stream chunks may be a string or LangChain-style content blocks. */
+function normalizeStreamChunk(chunk) {
+    return flattenAiContentForUi(chunk);
+}
+
 function handleChunk(chunkText, metadata = {}) {
+    chunkText = normalizeStreamChunk(chunkText);
     clearThinkingIndicator();
     if (!activeAiMessage) {
         const lastWrapper = messagesArea.lastElementChild;
@@ -2350,14 +2410,15 @@ function renderMessage(msg) {
     }
 
     // Guard up-front: skip messages with no useful content at all
-    const hasContent = msg.content && msg.content.trim();
+    const flatContent = flattenAiContentForUi(msg.content);
+    const hasContent = flatContent && flatContent.trim();
     const hasToolCalls = msg.tool_calls && msg.tool_calls.length > 0;
     if (msg.type === 'ai' && !hasContent && !hasToolCalls) return;
     if (msg.type === 'tool' && !msg.content) return;
 
     // Final model reply after tools: backend now sends this even when stream events were missed.
     if (msg.type === 'ai' && hasContent && !hasToolCalls && activeAiMessage?.contentDiv) {
-        const sanitized = String(msg.content)
+        const sanitized = flatContent
             .replace(/```(?:json)?\s*\{[^}]*\}\s*```/gs, '')
             .replace(/```(?:json)?\s*```/g, '')
             .trim();
@@ -2426,7 +2487,7 @@ function renderMessage(msg) {
         if (hasContent) {
             const textDiv = document.createElement('div');
             // Strip any residual ```json ... ``` fences
-            const sanitized = msg.content
+            const sanitized = flatContent
                 .replace(/```(?:json)?\s*\{[^}]*\}\s*```/gs, '')
                 .replace(/```(?:json)?\s*```/g, '')
                 .trim();
@@ -2480,7 +2541,7 @@ function renderMessage(msg) {
         const pre = document.createElement('pre');
         pre.className = 'text-xs font-mono text-gray-600 m-0 p-0 bg-transparent overflow-x-auto whitespace-pre-wrap';
         
-        const out = msg.content;
+        const out = flattenAiContentForUi(msg.content);
         pre.textContent = out.length > 3000 ? out.substring(0, 3000) + '\n\n... (truncated for display)' : out;
         
         body.appendChild(pre);

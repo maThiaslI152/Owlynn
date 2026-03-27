@@ -83,16 +83,8 @@ async def init_agent(checkpointer=None):
     except Exception:
         pass
     
-    # Initialize LLM pool on startup (one-time cache population)
-    try:
-        from src.agent.llm import initialize_llm_pool
-        await initialize_llm_pool()
-        logger.info("[init_agent] LLM pool initialized")
-    except Exception as e:
-        logger.warning(f"[init_agent] LLM pool init failed: {e}")
-    
     builder = build_graph()
-    
+
     if checkpointer is None:
         # Use MemorySaver for M4 Air (more efficient than Redis)
         # Falls back from Redis automatically if needed
@@ -104,5 +96,5 @@ async def init_agent(checkpointer=None):
         except Exception as redis_err:
             logger.warning(f"[init_agent] Redis unavailable: {redis_err}, using MemorySaver")
             checkpointer = MemorySaver()
-            
+
     return builder.compile(checkpointer=checkpointer)

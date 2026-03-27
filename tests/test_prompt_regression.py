@@ -9,7 +9,6 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from src.agent.graph import build_graph
 from src.agent.nodes.memory import memory_inject_node
-from src.agent.nodes.tool_executor import tool_executor_node
 from src.agent.state import AgentState
 
 
@@ -17,9 +16,6 @@ SMALL_PROMPT = "Hi! Reply with exactly: SMALL_OK"
 COMPLEX_PROMPT = (
     "Design a 3-phase migration plan from monolith to microservices for a 20-person "
     "engineering team, including risks, rollback strategy, and weekly milestones."
-)
-TOOL_PROMPT = (
-    'Please search the web for "latest LangGraph release highlights" and summarize in 5 bullets.'
 )
 
 
@@ -113,50 +109,3 @@ async def test_prompt_regression_memory_injection():
     assert "memory_context" in result
     assert marker in result["memory_context"]
     assert result["persona"] == "helpful assistant"
-
-
-@pytest.mark.anyio
-async def test_prompt_regression_tool_request():
-    """
-    Verifies tool-request flow: model emits tool call -> tool executes -> final answer produced.
-    """
-    first_response = AIMessage(
-        content="",
-        tool_calls=[
-            {
-                "name": "web_search",
-                "args": {"query": "latest LangGraph release highlights"},
-                "id": "call_tool_regression",
-            }
-        ],
-    )
-    final_response = AIMessage(content="Here are 5 highlights with sources.")
-
-    mock_large_tools_llm = AsyncMock()
-    mock_large_tools_llm.ainvoke.side_effect = [first_response, final_response]
-
-    mock_tool_node = AsyncMock()
-    mock_tool_node.ainvoke.return_value = {
-        "messages": [
-            HumanMessage(content=TOOL_PROMPT),
-            first_response,
-            ToolMessage(content="Result: release notes snippet", tool_call_id="call_tool_regression"),
-        ]
-    }
-
-    state: AgentState = {
-        "messages": [HumanMessage(content=TOOL_PROMPT)],
-        "selected_tool": "web_search",
-        "memory_context": "None",
-    }
-
-    with patch(
-        "src.agent.nodes.tool_executor.get_large_llm_with_tools",
-        AsyncMock(return_value=mock_large_tools_llm),
-    ), patch("src.agent.nodes.tool_executor.tool_node", mock_tool_node):
-        result = await tool_executor_node(state)
-
-    assert result["model_used"] == "large"
-    assert "tool_result" in result
-    assert "release notes snippet" in result["tool_result"]
-    assert result["messages"][-1].content == "Here are 5 highlights with sources."

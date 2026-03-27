@@ -6,10 +6,11 @@ conversation history, execution mode, and other contextual flags.
 """
 
 import operator
-from typing import Annotated, TypedDict, Sequence, Any
+from typing import Annotated, TypedDict, Sequence
 from langchain_core.messages import BaseMessage
 
 from langgraph.graph.message import add_messages
+
 
 class AgentState(TypedDict):
     """
@@ -45,25 +46,13 @@ class AgentState(TypedDict):
     # Track if any tool execution was vetted/approved by security node
     execution_approved: bool | None
 
-    # Routing decision from small model: 'SIMPLE', 'CONTEXT', 'TOOL', 'COMPLEX'
-    routing_decision: str | None
-
-    # Pre-formulated search query for CONTEXT routing
-    search_query: str | None
-
-    # Confidence score from small model routing
-    routing_confidence: float | None
-
-    # Counter for validation retry loops
-    retry_count: int | None
-
-    # --- NEW FIELDS FOR TOOL SELECTION FLOW ---
-    route: str | None              # 'simple', 'complex', 'tool', 'memory'
-    selected_tool: str | None      # Set by tool_selector_node
-    tool_result: str | None        # Set after tool execution
+    # Routing decision: 'simple' or 'complex'
+    route: str | None
     model_used: str | None         # 'small' or 'large'
     memory_context: str | None     # Formatted context string
     persona: str | None            # Persona summary string
+
+    # Secure cyclic tool flow state
     pending_tool_calls: bool | None
     pending_tool_names: Annotated[list[str], operator.add]
     security_decision: str | None  # 'approved' | 'denied'

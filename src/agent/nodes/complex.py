@@ -1,3 +1,6 @@
+import asyncio
+import re
+
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.prebuilt import ToolNode
 
@@ -6,6 +9,7 @@ from src.agent.llm import get_large_llm
 from src.agent.response_styles import style_instruction_for_prompt
 from src.agent.tool_sets import COMPLEX_TOOLS_NO_WEB, COMPLEX_TOOLS_WITH_WEB
 from src.agent.lm_studio_compat import with_system_for_local_server
+from src.tools.core_tools import read_workspace_file
 
 COMPLEX_PROMPT = """You are an expert reasoning agent. Think step by step before answering.
 You have access to the user's memory context below — use it to personalize and ground your response.
@@ -22,7 +26,12 @@ Guidelines:
 - If reasoning through a problem, show your thinking clearly
 - Never fabricate facts — if uncertain, say so{style_hint}"""
 
-COMPLEX_TOOL_GUIDANCE_WEB = """
+# Models sometimes mimic bracketed “use tool X” system text instead of emitting real tool_calls; forbid that.
+_TOOL_CALL_DISCIPLINE = """
+Tool discipline: You have native function/tool calling in this API. Whenever you need file contents, web results, or sandbox code, you **must** emit an actual tool/function call; the UI executes it automatically. Do **not** answer with only prose like “use read_workspace_file…” or echo bracketed instructions — call the tool, wait for results, then write your answer from those results."""
+
+COMPLEX_TOOL_GUIDANCE_WEB = (
+    """
 You can call tools when they help answer the user accurately. For web questions, use a frontier-style workflow:
 
 1) web_search: Find candidate pages. Pass focus_query with the user's precise information need when it differs from the search keywords — results will be reranked for relevance.
@@ -35,14 +44,77 @@ Answer rules after tools return:
 - Ground claims in tool output only; do not invent facts, URLs, or quotes.
 - Use numbered citations [1], [2] in the answer that match excerpt numbers from fetch_webpage when you used them; include the source URL at least once per citation family.
 - If sources disagree, say so briefly. If tools returned nothing useful, say you could not verify online and avoid fabricating."""
+    + _TOOL_CALL_DISCIPLINE
+)
 
-COMPLEX_TOOL_GUIDANCE_NO_WEB = """
+COMPLEX_TOOL_GUIDANCE_NO_WEB = (
+    """
 You can call tools when they help answer the user accurately (web search is turned off for this chat — do not call web_search; use workspace files, sandbox Python, and memory tools only):
 - read_workspace_file: Read a file from the user's workspace when relevant.
 - execute_python_code: Run calculations or short scripts in the sandbox (non-interactive: never use input(); use fixed args or literals).
 - recall_memories: Search stored long-term memories about the user.
 
 After tools return, summarize results clearly for the user."""
+    + _TOOL_CALL_DISCIPLINE
+)
+
+
+def _web_search_tool_output_has_results(content: str) -> bool:
+    """True when web_search returned normal hit listings (not structured failure)."""
+    c = content or ""
+    if "Unable to retrieve online results" in c:
+        return False
+    if c.startswith("[web_search]") and ("Error" in c or "Unable" in c):
+        return False
+    if "blocked_by_captcha" in c:
+        return False
+    return ("🔍" in c or "search results for" in c) and "URL:" in c
+
+
+def _synthetic_answer_from_web_search_tool(content: str) -> str:
+    """
+    When the LLM returns empty after a successful web_search, surface the tool text
+    so the user still gets a usable answer in the UI.
+    """
+    c = (content or "").strip()
+    if not c:
+        return (
+            "I ran **web_search** but the tool returned no text. "
+            "Try again or narrow the query."
+        )
+    pref = (
+        "The model returned an empty message after **web_search**, so here is the "
+        "search payload directly (you can use the links below):\n\n"
+    )
+    cap = 4500
+    if len(c) > cap:
+        return pref + c[:cap] + "\n\n… [truncated]"
+    return pref + c
+
+
+def build_web_search_answer_nudge_messages(tool_messages: list) -> list[HumanMessage]:
+    """After a successful web_search, remind the model it must write the final answer (non-empty)."""
+    if not tool_messages:
+        return []
+    for m in tool_messages:
+        if not isinstance(m, ToolMessage):
+            continue
+        if (getattr(m, "name", None) or "") != "web_search":
+            continue
+        c = m.content if isinstance(m.content, str) else str(m.content or "")
+        if not _web_search_tool_output_has_results(c):
+            continue
+        return [
+            HumanMessage(
+                content=(
+                    "[Internal reminder for assistant] **web_search** returned results above. "
+                    "You must now write a complete answer for the user in plain language using those "
+                    "results (definition, main ideas, optional link to the official docs). "
+                    "Do not reply with empty content or only tool metadata."
+                )
+            )
+        ]
+    return []
 
 
 def build_fetch_retry_nudge_messages(tool_messages: list) -> list[HumanMessage]:
@@ -94,27 +166,30 @@ def _fallback_for_blank_response(messages: list, *, web_search_enabled: bool) ->
     """
     When the model returns empty assistant content, synthesize a safe user-visible reply.
 
-    Prefers context from recent ``ToolMessage`` outputs (e.g. failed web_search). If there are no
-    tool messages yet (first LLM turn before any tools) or no matching failure, returns a generic
-    message so the thread does not stay blank.
+    Prefers context from recent ``ToolMessage`` outputs (successful or failed ``web_search``).
+    If there are no tool messages yet (first LLM turn before any tools) or no match, returns a
+    generic message so the thread does not stay blank.
     """
     for m in reversed(messages):
         if not isinstance(m, ToolMessage):
             continue
         c = m.content if isinstance(m.content, str) else str(m.content or "")
-        if (getattr(m, "name", None) or "") == "web_search" and (
-            c.startswith("[web_search]")
-            or "Unable to retrieve online results" in c
-            or "blocked_by_captcha" in c
-        ):
-            return AIMessage(
-                content=(
-                    "I couldn’t verify this online right now because web search providers returned "
-                    "errors or bot challenges. I did not find reliable live sources in this run. "
-                    "If you want, I can retry with a narrower query, a different provider, or use "
-                    "another source you provide."
+        if (getattr(m, "name", None) or "") == "web_search":
+            if _web_search_tool_output_has_results(c):
+                return AIMessage(content=_synthetic_answer_from_web_search_tool(c))
+            if (
+                c.startswith("[web_search]")
+                or "Unable to retrieve online results" in c
+                or "blocked_by_captcha" in c
+            ):
+                return AIMessage(
+                    content=(
+                        "I couldn’t verify this online right now because web search providers returned "
+                        "errors or bot challenges. I did not find reliable live sources in this run. "
+                        "If you want, I can retry with a narrower query, a different provider, or use "
+                        "another source you provide."
+                    )
                 )
-            )
     if web_search_enabled:
         return AIMessage(
             content=(
@@ -131,65 +206,115 @@ def _fallback_for_blank_response(messages: list, *, web_search_enabled: bool) ->
     )
 
 
-async def complex_node(state: AgentState) -> AgentState:
-    memory_context = state.get("memory_context", "None")
-    persona = state.get("persona", "No persona available")
-    mode = state.get("mode") or "tools_on"
-    thread_messages = list(state.get("messages") or [])
+def _flatten_human_content(content) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict) and block.get("type") == "text":
+                parts.append(str(block.get("text", "")))
+        return "\n".join(parts)
+    return str(content or "")
 
-    web_on = state.get("web_search_enabled")
-    if web_on is None:
-        web_on = True
-    web_on = bool(web_on)
 
-    style_hint = style_instruction_for_prompt(state.get("response_style"))
+def _latest_user_text(messages: list) -> str:
+    for m in reversed(messages):
+        if isinstance(m, HumanMessage):
+            return _flatten_human_content(m.content)
+    return ""
 
-    system_text = COMPLEX_PROMPT.format(
-        memory_context=memory_context,
-        persona=persona,
-        style_hint=style_hint,
+
+def _workspace_paths_from_text(text: str) -> list[str]:
+    """Filenames from chat upload injections (server + legacy wording)."""
+    paths: list[str] = []
+    seen: set[str] = set()
+    for pat in (
+        r"\[Workspace file\s+`([^`]+)`",
+        r"Workspace file\s+`([^`]+)`",
+        r"\[File:\s*([^\]\n]+?)\s+uploaded to workspace",
+    ):
+        for m in re.finditer(pat, text, re.IGNORECASE):
+            p = (m.group(1) or "").strip()
+            if p and p not in seen:
+                seen.add(p)
+                paths.append(p)
+    return paths
+
+
+def _user_intent_needs_workspace_read(text: str) -> bool:
+    t = (text or "").lower()
+    needles = (
+        "summarize",
+        "summary",
+        "study",
+        "read this",
+        "read the",
+        "explain",
+        "what does",
+        "what is",
+        "help me",
+        "tell me",
+        "analyze",
+        "slide",
+        "pdf",
+        "document",
+        "this file",
+        "lecture",
+        "chapter",
+        "content of",
+        "outline",
+        "key point",
+        "notes",
     )
-    if mode != "tools_off":
-        system_text += COMPLEX_TOOL_GUIDANCE_WEB if web_on else COMPLEX_TOOL_GUIDANCE_NO_WEB
+    return any(n in t for n in needles)
 
-    system = SystemMessage(content=system_text)
 
-    if mode == "tools_off":
-        large_llm = await get_large_llm()
-        prompt_messages = with_system_for_local_server(system, thread_messages)
-        response = await large_llm.ainvoke(prompt_messages)
-        return {
-            "messages": [AIMessage(content=response.content)],
-            "model_used": "large",
-        }
+def _looks_like_prose_tool_stall(response: AIMessage) -> bool:
+    """Local models often answer with 'use read_workspace_file…' instead of tool_calls."""
+    if getattr(response, "tool_calls", None):
+        return False
+    c = str(getattr(response, "content", "") or "").strip()
+    if not c:
+        return True
+    low = c.lower()
+    if "read_workspace_file" in low:
+        return True
+    if "uploaded to workspace" in low and ("tool" in low or "read_" in low):
+        return True
+    if len(c) < 420:
+        return True
+    return False
 
-    tools = COMPLEX_TOOLS_WITH_WEB if web_on else COMPLEX_TOOLS_NO_WEB
-    tool_node = ToolNode(tools)
 
-    large_base = await get_large_llm()
-    large_llm = large_base.bind_tools(tools)
-
-    prompt_messages = with_system_for_local_server(system, thread_messages)
-    response = await large_llm.ainvoke(prompt_messages)
-
-    if not (getattr(response, "tool_calls", None) and response.tool_calls):
-        return {"messages": [response], "model_used": "large"}
-
-    after_first = thread_messages + [response]
-    tool_payload = await tool_node.ainvoke({"messages": after_first})
-    messages_after_tools = list(tool_payload["messages"])
-    tool_only = messages_after_tools[len(after_first) :]
-    nudge = build_fetch_retry_nudge_messages(tool_only) if web_on else []
-    if nudge:
-        messages_after_tools = messages_after_tools + nudge
-    final_response = await large_llm.ainvoke(messages_after_tools)
-    if not str(getattr(final_response, "content", "") or "").strip():
-        final_response = _fallback_for_blank_response(
-            messages_after_tools, web_search_enabled=web_on
-        )
-
-    delta = messages_after_tools[len(thread_messages) :] + [final_response]
-    return {"messages": delta, "model_used": "large"}
+async def _auto_read_workspace_bundle(paths: list[str]) -> str:
+    """Read files via the same tool implementation the graph uses (thread pool)."""
+    sections: list[str] = []
+    per_cap = 28_000
+    for raw in paths[:3]:
+        p = raw.strip()
+        if not p:
+            continue
+        try:
+            body = await asyncio.to_thread(read_workspace_file.invoke, {"filename": p})
+        except Exception as e:
+            body = f"[read_workspace_file error for {p!r}: {e}]"
+        b = str(body)
+        if len(b) > per_cap:
+            b = (
+                b[:per_cap]
+                + f"\n\n[Truncated after {per_cap} characters; full file remains in the workspace.]"
+            )
+        sections.append(f"### File: {p}\n{b}")
+    if not sections:
+        return ""
+    return (
+        "[Automated workspace read — files were read by the host because the model did not emit "
+        "tool calls. Use ONLY the text below to answer the user now — do not ask them to run a tool.]\n\n"
+        + "\n\n".join(sections)
+    )
 
 
 async def complex_llm_node(state: AgentState) -> AgentState:
@@ -247,9 +372,37 @@ async def complex_llm_node(state: AgentState) -> AgentState:
         response = _fallback_for_blank_response(
             thread_messages, web_search_enabled=web_on
         )
+        has_tool_calls = bool(getattr(response, "tool_calls", None))
+
+    out_messages: list = [response]
+
+    # Local OpenAI-compatible servers often return plain text (“use read_workspace_file…”) instead
+    # of structured tool_calls. When uploads are clearly present, read the files here and re-prompt once.
+    if not has_tool_calls:
+        utext = _latest_user_text(thread_messages)
+        paths = _workspace_paths_from_text(utext)
+        if (
+            paths
+            and _user_intent_needs_workspace_read(utext)
+            and _looks_like_prose_tool_stall(response)
+        ):
+            bundle = await _auto_read_workspace_bundle(paths)
+            if bundle.strip():
+                nudge = HumanMessage(content=bundle)
+                second_prompt = with_system_for_local_server(
+                    system, thread_messages + [nudge]
+                )
+                response = await large_llm.ainvoke(second_prompt)
+                has_tool_calls = bool(getattr(response, "tool_calls", None))
+                if not has_tool_calls and not str(getattr(response, "content", "") or "").strip():
+                    response = _fallback_for_blank_response(
+                        thread_messages + [nudge], web_search_enabled=web_on
+                    )
+                    has_tool_calls = bool(getattr(response, "tool_calls", None))
+                out_messages = [nudge, response]
 
     return {
-        "messages": [response],
+        "messages": out_messages,
         "model_used": "large",
         "pending_tool_calls": bool(getattr(response, "tool_calls", None)),
         # Clear prior deny state after a fresh LLM turn.
@@ -286,8 +439,9 @@ async def complex_tool_action_node(state: AgentState) -> AgentState:
         delta = output_messages
 
     nudge = build_fetch_retry_nudge_messages(delta) if web_on else []
-    if nudge:
-        delta = list(delta) + nudge
+    ws_nudge = build_web_search_answer_nudge_messages(delta) if web_on else []
+    if nudge or ws_nudge:
+        delta = list(delta) + nudge + ws_nudge
 
     return {
         "messages": delta,

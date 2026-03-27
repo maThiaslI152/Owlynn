@@ -1,5 +1,6 @@
 # Virtual Environment
 .venv/
+.venv-local/
 venv/
 ENV/
 
@@ -7,19 +8,24 @@ ENV/
 __pycache__/
 *.py[cod]
 *$py.class
+*.egg-info/
+dist/
+build/
 
 # OS Files
 .DS_Store
 Thumbs.db
 
-# Project-specific logs and data
-graph_error.log
-data/
-workspace/
+# IDE / Editor
 .idea/
 .vscode/
 .cursor/
 .antigravity/
+
+# Project-specific logs and data
+graph_error.log
+data/
+workspace/
 
 # Environment Variables
 .env
@@ -30,3 +36,9 @@ workspace/
 
 # Rust / Tauri
 src-tauri/target/
+
+# ChromaDB local data
+src/tools/glossaries/chroma_db/
+
+# Node
+node_modules/

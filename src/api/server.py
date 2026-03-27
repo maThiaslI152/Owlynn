@@ -30,15 +30,9 @@ from src.memory.personal_assistant import (
     track_topic,
     update_interests,
 )
-from src.config.settings import WORKSPACE_DIR
-
-def get_project_workspace(project_id: str = "default") -> str:
-    if not project_id or project_id == "null" or project_id == "undefined":
-         project_id = "default"
-    path = os.path.abspath(os.path.join(WORKSPACE_DIR, "projects", project_id))
-    os.makedirs(path, exist_ok=True)
-    return path
+from src.config.settings import WORKSPACE_DIR, get_project_workspace, normalize_project_id
 from src.api.file_processor import start_watcher
+from src.tools.workspace_context import reset_active_project, set_active_project_for_run
 
 from contextlib import asynccontextmanager
 
@@ -389,16 +383,17 @@ async def api_update_project_chat(project_id: str, chat_id: str, body: dict):
 @app.get("/api/tools")
 async def api_get_tools():
     """Returns a list of available tools for the Customize view."""
-    from src.tools import tool_registry
+    from src.agent.tool_sets import COMPLEX_TOOLS_WITH_WEB
     tools = []
-    for name, tool in tool_registry.items():
-        desc = getattr(tool, "description", "")
-        if not desc and hasattr(tool, "__doc__") and tool.__doc__:
-            desc = tool.__doc__.strip().split("\n")[0]
+    for t in COMPLEX_TOOLS_WITH_WEB:
+        name = getattr(t, "name", str(t))
+        desc = getattr(t, "description", "")
+        if not desc and hasattr(t, "__doc__") and t.__doc__:
+            desc = t.__doc__.strip().split("\n")[0]
         tools.append({
-            "name": name, 
+            "name": name,
             "description": desc or "No description available.",
-            "type": "core" # or plugin
+            "type": "core",
         })
     return tools
 
@@ -808,6 +803,7 @@ class GraphSession:
         self.task = None
         self.event_buffer = [] # Store all events for the current turn
         self.is_running = False
+        self.last_project_id = "default"
 
     async def add_listener(self):
         q = asyncio.Queue()
@@ -826,11 +822,16 @@ class GraphSession:
     async def start_run(self, input_data, config):
         if self.is_running:
             return
+        if isinstance(input_data, dict):
+            pid = input_data.get("project_id")
+            if pid is not None:
+                self.last_project_id = normalize_project_id(pid)
         self.event_buffer = []
         self.is_running = True
         self.task = asyncio.create_task(self._execute(input_data, config))
 
     async def _execute(self, input_data, config):
+        token = set_active_project_for_run(self.last_project_id)
         try:
             # Initial status
             start_msg = {"type": "status", "content": "reasoning"}
@@ -851,6 +852,7 @@ class GraphSession:
             for q in list(self.listeners):
                 await q.put(err_msg)
         finally:
+            reset_active_project(token)
             self.is_running = False
             # Final status update
             done_msg = {"type": "status", "content": "idle"}
@@ -934,7 +936,10 @@ async def websocket_endpoint(websocket: WebSocket, thread_id: str):
                     elif kind == "on_chat_model_stream" and node in ["simple", "complex_llm"]:
                         chunk = event["data"]["chunk"]
                         if chunk.content:
-                            await websocket.send_json({"type": "chunk", "content": chunk.content})
+                            # Stream deltas may be str or list[content_block]; stringify like finalize path.
+                            text = _stringify_lc_message_content(chunk.content)
+                            if text:
+                                await websocket.send_json({"type": "chunk", "content": text})
                         
                     elif kind == "on_chain_end":
                         output = event["data"].get("output")
@@ -1123,6 +1128,8 @@ async def build_message_content(text: str, files: list):
     """
     import base64
     from io import BytesIO
+
+    MAX_INLINE_PDF_CHARS = 12_000
     
     content_parts = []
     text_injections = []
@@ -1147,27 +1154,35 @@ async def build_message_content(text: str, files: list):
             })
         
         elif mime == "application/pdf" or name.lower().endswith(".pdf"):
-            print(f"[PDF] Uploaded '{name}'. Adding workspace reference.")
-            # Notify the agent the file is in the workspace and readable via tool
-            text_injections.append(f"[File: {name} uploaded to workspace. Use `read_workspace_file` tool to read it if needed.]")
-            
-            # Optional: Visual Layer only if multimodal (for backward compatibility or graphics)
-            # composite_b64 = await asyncio.to_thread(render_pdf_as_composite, raw_bytes)
-            # if composite_b64:
-            #     has_multimodal = True
-            #     content_parts.append({
-            #         "type": "text",
-            #         "text": f"[File: {name}] Visual Layout (pages stitched into one continuous image below):"
-            #     })
-            #     content_parts.append({
-            #         "type": "image_url",
-            #         "image_url": {"url": f"data:image/jpeg;base64,{composite_b64}"}
-            #     })
+            print(f"[PDF] Uploaded '{name}'. Extracting text for chat context.")
+            # extract_pdf_text defined below — called after module load
+            pdf_text = await asyncio.to_thread(extract_pdf_text, raw_bytes)
+            pdf_text = (pdf_text or "").strip()
+            if len(pdf_text) >= 200:
+                excerpt = pdf_text[:MAX_INLINE_PDF_CHARS]
+                if len(pdf_text) > MAX_INLINE_PDF_CHARS:
+                    excerpt += (
+                        "\n\n[PDF truncated in this prompt for size; full file is on disk — "
+                        "call read_workspace_file as a real tool if you need the rest.]"
+                    )
+                text_injections.append(
+                    f"[Workspace file `{name}` — text extracted from PDF below. "
+                    f"Use this to answer when it is enough; if not, call read_workspace_file with that path "
+                    f"(function/tool call, not instructions to the user).]\n\n---\n{excerpt}\n---"
+                )
+            else:
+                text_injections.append(
+                    f"[Workspace file `{name}` — little or no extractable text in upload preview. "
+                    f"You must invoke read_workspace_file for `{name}` as a tool/function call before answering.]"
+                )
 
         else:
             # Text / code file
             print(f"[File] Uploaded '{name}'. Adding workspace reference.")
-            text_injections.append(f"[File: {name} uploaded to workspace. Use `read_workspace_file` tool to read it if needed.]")
+            text_injections.append(
+                f"[Workspace file `{name}` saved. Invoke read_workspace_file as a tool with that path if you need contents — "
+                f"do not answer with only a suggestion to use the tool.]"
+            )
 
 
     # Build final content

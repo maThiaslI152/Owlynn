@@ -10,13 +10,26 @@ PROJECT_ROOT = Path(__file__).parent.parent.parent
 DATA_DIR = PROJECT_ROOT / "data"
 WORKSPACE_DIR = PROJECT_ROOT / "workspace"
 
+
+def normalize_project_id(project_id: str | None) -> str:
+    if project_id is None:
+        return "default"
+    s = str(project_id).strip()
+    if not s or s.lower() in ("null", "undefined"):
+        return "default"
+    return s
+
+
+def get_project_workspace(project_id: str | None = None) -> str:
+    """Absolute path for project-scoped files (matches REST/WS uploads under workspace/projects/<id>)."""
+    pid = normalize_project_id(project_id)
+    path = WORKSPACE_DIR / "projects" / pid
+    path.mkdir(parents=True, exist_ok=True)
+    return str(path.resolve())
+
 # Server Settings
 HOST = "0.0.0.0"
 PORT = 8000
-
-# Agent Settings
-DEFAULT_MODEL = "qwen/qwen3.5-9b"
-DEFAULT_LLM_URL = "http://127.0.0.1:8080/v1"
 
 # External Services
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
@@ -62,12 +75,12 @@ TAVILY_API_KEY = (os.getenv("TAVILY_API_KEY", "") or "").strip()
 M4_MAC_OPTIMIZATION = {
     "small_model": {
         "max_tokens": 1024,      # Routing doesn't need long responses
-        "temperature": 0.3,      # Lower for consistent routing
+        "temperature": 0.1,      # Lower for consistent routing
         "timeout": 10,           # seconds - small model should be fast
     },
     "large_model": {
-        "max_tokens": 4096,      # Reduced from 8192 for M4 memory efficiency
-        "temperature": 0.4,
+        "max_tokens": 12000,      # Reduced from 8192 for M4 memory efficiency
+        "temperature": 0.5,
         "timeout": 30,           # seconds - allow time for reasoning
     },
     "memory": {

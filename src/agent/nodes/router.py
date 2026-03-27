@@ -102,6 +102,15 @@ async def router_node(state: AgentState) -> AgentState:
         logger.info("[router] Complex path — web/live-data intent (web_search enabled)")
         return {"route": "complex"}
 
+    # Attachments saved to workspace need the large model + tools (read_workspace_file, etc.).
+    if (
+        "[file:" in user_lower
+        or "uploaded to workspace" in user_lower
+        or "workspace file" in user_lower
+    ):
+        logger.info("[router] Complex path — workspace / attachment context")
+        return {"route": "complex"}
+
     # Quick keyword check to bypass LLM for obvious cases (saves ~1s).
     # NOTE: Do NOT include "weather" here — that must use complex + web_search when enabled.
     simple_keywords = [
