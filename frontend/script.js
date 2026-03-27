@@ -718,6 +718,11 @@ async function loadProjects() {
         renderWelcomeRecents();
         renderProjectInspector(projects.find((p) => p.id === activeProjectId) || null);
         setWorkspaceVisibility();
+        // Populate sidebar recents from the active/default project
+        const activeProject = projects.find((p) => p.id === getEffectiveProjectId());
+        if (activeProject) {
+            renderProjectChats(activeProject.chats || []);
+        }
     } catch (e) {
         console.error('Failed to load projects:', e);
     }
