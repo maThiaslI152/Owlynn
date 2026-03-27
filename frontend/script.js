@@ -1792,6 +1792,7 @@ async function handleSecurityInterrupt(interrupts) {
 function handleAskUserInterrupt(payload) {
     resetTransientExecutionUI();
     const question = payload.question || 'The agent needs more information to continue.';
+    const choices = Array.isArray(payload.choices) ? payload.choices.slice(0, 3) : [];
 
     const wrapper = document.createElement('div');
     wrapper.className = 'flex gap-4 group-msg mb-6';
@@ -1807,23 +1808,37 @@ function handleAskUserInterrupt(payload) {
 
     const card = document.createElement('div');
     card.className = 'ask-user-card';
-    card.innerHTML = `
+
+    // Header
+    let html = `
         <div class="flex items-center gap-2 mb-3 text-sm font-medium" style="color: var(--owl-accent);">
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-            Agent needs your input
+            Owlynn needs your input
         </div>
-        <p class="text-sm mb-3" style="color: var(--owl-text);">${escapeHtml(question)}</p>
+        <p class="text-sm mb-3" style="color: var(--owl-text);">${escapeHtml(question)}</p>`;
+
+    // Choice buttons (1-3)
+    if (choices.length > 0) {
+        html += `<div class="ask-user-choices" style="display:flex;flex-wrap:wrap;gap:0.5rem;margin-bottom:0.75rem;">`;
+        choices.forEach((c, i) => {
+            html += `<button class="ask-choice-btn" onclick="submitAskUserChoice('${escapeHtml(c)}')" style="padding:0.4rem 0.8rem;border-radius:0.5rem;font-size:0.85rem;font-weight:500;background:var(--accent-soft);border:1px solid rgba(199,154,59,0.4);color:#f6e2b4;cursor:pointer;transition:all 0.15s;">${escapeHtml(c)}</button>`;
+        });
+        html += `</div>`;
+    }
+
+    // Free text input (always present)
+    html += `
         <div class="flex gap-2">
-            <input type="text" class="flex-1 px-3 py-2 rounded-lg text-sm border outline-none focus:ring-1 focus:ring-[var(--owl-accent)]" placeholder="Type your answer..." id="askUserInput" />
-            <button onclick="submitAskUserResponse()" class="px-4 py-2 rounded-lg text-sm font-medium transition-colors">Send</button>
-        </div>
-    `;
+            <input type="text" class="flex-1 px-3 py-2 rounded-lg text-sm border outline-none focus:ring-1 focus:ring-[var(--owl-accent)]" placeholder="${choices.length > 0 ? 'Or type your own answer...' : 'Type your answer...'}" id="askUserInput" />
+            <button onclick="submitAskUserResponse()" class="px-4 py-2 rounded-lg text-sm font-medium transition-colors" style="background:var(--accent-soft);border:1px solid rgba(199,154,59,0.4);color:#f6e2b4;">Send</button>
+        </div>`;
+
+    card.innerHTML = html;
     contentDiv.appendChild(card);
     wrapper.appendChild(contentDiv);
     messagesArea.appendChild(wrapper);
     scrollToBottom(true);
 
-    // Focus the input
     setTimeout(() => {
         const input = document.getElementById('askUserInput');
         if (input) {
@@ -1835,17 +1850,30 @@ function handleAskUserInterrupt(payload) {
     }, 100);
 }
 
+function submitAskUserChoice(choice) {
+    _sendAskUserAnswer(choice);
+}
+
 function submitAskUserResponse() {
     const input = document.getElementById('askUserInput');
     if (!input) return;
     const answer = input.value.trim();
     if (!answer) return;
+    _sendAskUserAnswer(answer);
+}
 
-    // Disable the input
-    input.disabled = true;
-    input.parentElement.querySelector('button').disabled = true;
-    input.parentElement.querySelector('button').textContent = 'Sent';
-
+function _sendAskUserAnswer(answer) {
+    // Disable all inputs and buttons in the ask-user card
+    const card = document.querySelector('.ask-user-card');
+    if (card) {
+        card.querySelectorAll('input, button').forEach(el => { el.disabled = true; });
+        // Show what was selected
+        const feedback = document.createElement('div');
+        feedback.className = 'text-xs mt-2';
+        feedback.style.color = 'var(--owl-accent)';
+        feedback.textContent = `✓ ${answer}`;
+        card.appendChild(feedback);
+    }
     if (socket && socket.readyState === WebSocket.OPEN) {
         socket.send(JSON.stringify({ type: 'ask_user_response', answer }));
     }
@@ -4009,6 +4037,7 @@ if (typeof escapeHtml !== 'function') {
 
 window.toggleMobileSidebar = toggleMobileSidebar;
 window.submitAskUserResponse = submitAskUserResponse;
+window.submitAskUserChoice = submitAskUserChoice;
 
 window.App = {
     toggleSidebar: toggleMobileSidebar,

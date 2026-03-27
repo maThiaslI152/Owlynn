@@ -457,6 +457,8 @@ input[type="range"] { accent-color: var(--accent); height: 6px; }
 .ask-user-card input { flex: 1; }
 .ask-user-card button { padding: 0.5rem 1rem; border-radius: var(--radius); background: var(--accent-soft); border: 1px solid rgba(199,154,59,0.4); color: #f6e2b4; font-weight: 500; font-size: 0.875rem; }
 .ask-user-card button:hover { background: var(--accent-hover); }
+.ask-user-card button:disabled { opacity: 0.5; cursor: not-allowed; }
+.ask-choice-btn:hover { background: var(--accent-hover) !important; transform: translateY(-1px); }
 
 /* ─── Error Message ─── */
 .error-card { background: rgba(239,68,68,0.08); border-left: 4px solid var(--danger); padding: 0.75rem 1rem; border-radius: var(--radius); margin: 0.75rem 0; }

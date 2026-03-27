@@ -1,8 +1,8 @@
 """
 AskUserQuestion Tool — Let the agent ask clarifying questions mid-task.
-Mirrors Cowork's AskUserQuestion for HITL interaction during complex workflows.
 
-Uses LangGraph's interrupt() to pause execution and wait for user input.
+Supports 1-3 suggested choices plus a free-text option.
+Uses LangGraph interrupt() to pause and wait for user input.
 """
 
 from langchain_core.tools import tool
@@ -10,20 +10,24 @@ from langgraph.types import interrupt
 
 
 @tool
-def ask_user(question: str) -> str:
+def ask_user(question: str, choices: str = "") -> str:
     """
     Asks the user a clarifying question and waits for their response.
-    Use this when you need more information to complete a task accurately.
+    Use this ONCE when a request is clearly ambiguous. Don't over-ask.
 
-    The task will pause until the user responds.
+    The user sees the question with clickable choice buttons (if provided)
+    plus a free-text input for custom answers.
 
     Args:
-        question: The question to ask the user.
+        question: The question to ask.
+        choices: Optional comma-separated choices (1-3 max). Example: "PDF,Word,PowerPoint"
     """
-    # interrupt() pauses the graph and sends the question to the frontend.
-    # When the user responds via Command(resume=...), execution continues
-    # with the response as the return value.
-    response = interrupt({"type": "ask_user", "question": question})
+    choice_list = [c.strip() for c in choices.split(",") if c.strip()][:3] if choices else []
+    response = interrupt({
+        "type": "ask_user",
+        "question": question,
+        "choices": choice_list,
+    })
     if isinstance(response, dict):
         return response.get("answer", str(response))
     return str(response)
