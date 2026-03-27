@@ -723,3 +723,9 @@ input[type="range"] { accent-color: var(--accent); height: 6px; }
 .chat-list-item .chat-meta { font-size: 0.75rem; color: var(--text-muted); white-space: nowrap; }
 .chat-list-item .chat-menu-btn { opacity: 0; transition: opacity var(--transition); }
 .chat-list-item:hover .chat-menu-btn { opacity: 1; }
+
+/* ─── Project Detail View ─── */
+@media (max-width: 768px) {
+  #view-project-detail .view-page { flex-direction: column !important; }
+  #projectDetailSidebar { width: 100% !important; border-left: none !important; border-top: 1px solid var(--border); }
+}

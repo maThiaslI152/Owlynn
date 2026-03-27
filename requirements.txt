@@ -5,10 +5,7 @@ langchain-openai
 redis
 mem0ai
 chromadb
-mlx-lm
 mcp
-langgraph-checkpoint-redis
-sentence-transformers
 fastapi
 uvicorn
 websockets

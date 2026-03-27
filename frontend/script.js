@@ -3549,14 +3549,96 @@ function applyProjectsFilter() {
         `;
         card.onclick = (e) => {
             if (e.target.closest('.project-card-menu')) return;
-            switchProject(p.id);
-            switchView('chat');
+            openProjectDetail(p.id);
         };
         card.querySelector('.project-card-menu').onclick = (e) => {
             e.stopPropagation();
             showProjectContextMenu(e, p, isPinned);
         };
         container.appendChild(card);
+    });
+}
+
+// ─── Project Detail View ────────────────────────────────────────────────────
+
+function openProjectDetail(projectId) {
+    const project = cachedProjects.find(p => p.id === projectId);
+    if (!project) return;
+
+    switchView('project-detail');
+
+    const isPinned = Boolean(localStorage.getItem(`pinproj_${projectId}`));
+    document.getElementById('projectDetailName').textContent = project.name || 'Project';
+    document.getElementById('projectDetailDesc').textContent = project.instructions || 'No description';
+    document.getElementById('projectDetailInstructions').textContent = project.instructions || 'Add instructions to tailor responses for this project.';
+    document.getElementById('projectDetailPin').textContent = isPinned ? '★' : '☆';
+
+    // Render recent chats for this project
+    const chatsEl = document.getElementById('projectDetailChats');
+    if (chatsEl) {
+        const chats = (project.chats || []).sort((a, b) => (b.created_at || 0) - (a.created_at || 0)).slice(0, 10);
+        if (chats.length === 0) {
+            chatsEl.innerHTML = '<p class="empty-hint">No chats in this project yet.</p>';
+        } else {
+            chatsEl.innerHTML = '';
+            chats.forEach(chat => {
+                const item = document.createElement('div');
+                item.className = 'chat-list-item';
+                item.style.maxWidth = 'none';
+                const relTime = chat.created_at ? _relativeTime(chat.created_at * 1000) : '';
+                item.innerHTML = `
+                    <span class="chat-title">${DOMPurify.sanitize(chat.name || 'Untitled')}</span>
+                    <span class="chat-meta">${relTime}</span>
+                `;
+                item.onclick = () => { switchProject(projectId, false); switchChat(chat.id); switchView('chat'); };
+                chatsEl.appendChild(item);
+            });
+        }
+    }
+
+    // Render files
+    const filesEl = document.getElementById('projectDetailFiles');
+    if (filesEl) {
+        const files = project.files || [];
+        if (files.length === 0) {
+            filesEl.innerHTML = '<p class="empty-hint">No files uploaded.</p>';
+        } else {
+            filesEl.innerHTML = files.map(f =>
+                `<div style="padding:0.4rem 0;border-bottom:1px solid var(--border);color:var(--text)">${DOMPurify.sanitize(f.name || 'file')}</div>`
+            ).join('');
+        }
+    }
+
+    // Wire up buttons
+    document.getElementById('projectBackBtn').onclick = () => switchView('projects');
+    document.getElementById('projectDetailMenu').onclick = (e) => {
+        showProjectContextMenu(e, project, isPinned);
+    };
+    document.getElementById('projectDetailPin').onclick = () => {
+        if (isPinned) localStorage.removeItem(`pinproj_${projectId}`);
+        else localStorage.setItem(`pinproj_${projectId}`, '1');
+        openProjectDetail(projectId); // refresh
+    };
+    document.getElementById('projectEditInstructions').onclick = () => editProject(projectId, project.name);
+    document.getElementById('projectUploadFile').onclick = () => {
+        switchProject(projectId, false);
+        document.getElementById('workspaceFileInput')?.click();
+    };
+    document.getElementById('projectSendBtn').onclick = () => {
+        const input = document.getElementById('projectInput');
+        const text = input?.value?.trim();
+        if (!text) return;
+        switchProject(projectId, false);
+        switchView('chat');
+        messageInput.value = text;
+        input.value = '';
+        chatForm.dispatchEvent(new Event('submit'));
+    };
+    document.getElementById('projectInput')?.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            document.getElementById('projectSendBtn')?.click();
+        }
     });
 }
 
