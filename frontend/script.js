@@ -3772,6 +3772,30 @@ async function openProjectDetail(projectId) {
     document.getElementById('projectViewerClose').onclick = () => {
         document.getElementById('projectFileViewer')?.classList.add('hidden');
     };
+
+    // Resize split viewer
+    const resizeHandle = document.getElementById('projectViewerResize');
+    const viewerPanel = document.getElementById('projectFileViewer');
+    if (resizeHandle && viewerPanel && !resizeHandle._setup) {
+        resizeHandle._setup = true;
+        let resizing = false;
+        resizeHandle.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            resizing = true;
+            document.body.style.cursor = 'col-resize';
+            document.body.style.userSelect = 'none';
+        });
+        window.addEventListener('mousemove', (e) => {
+            if (!resizing) return;
+            const newWidth = window.innerWidth - e.clientX;
+            if (newWidth >= 250 && newWidth <= window.innerWidth * 0.7) {
+                viewerPanel.style.width = `${newWidth}px`;
+            }
+        });
+        window.addEventListener('mouseup', () => {
+            if (resizing) { resizing = false; document.body.style.cursor = ''; document.body.style.userSelect = ''; }
+        });
+    }
     document.getElementById('projectSendBtn').onclick = () => {
         const input = document.getElementById('projectInput');
         const text = input?.value?.trim();
