@@ -13,22 +13,6 @@ from .sandbox import PodmanSandbox
 from .thai_translation_tool import lookup_thai_terms
 from .web_tools import web_search, fetch_webpage
 
-# Try to import Lightpanda tools (optional dependency)
-try:
-    from .lightpanda_tool import (
-        lightpanda_fetch_page,
-        lightpanda_execute_js,
-        lightpanda_screenshot,
-        lightpanda_extract_data,
-        lightpanda_health_check
-    )
-    LIGHTPANDA_AVAILABLE = True
-except ImportError:
-    LIGHTPANDA_AVAILABLE = False
-    # Define placeholder tools that inform user about installation
-    def _lightpanda_not_installed(*args, **kwargs):
-        return "Error: Lightpanda not installed. Install with: pip install lightpanda"
-
 from ..memory.user_profile import get_profile, update_profile
 from ..memory.memory_manager import save_memory, search_memories
 from ..memory.persona import get_persona, update_persona_field
@@ -523,18 +507,7 @@ CORE_TOOLS = [
     # Web tools
     web_search,
     fetch_webpage,
-    # Lightpanda browser tools (if available)
 ]
-
-# Add Lightpanda tools if installed
-if LIGHTPANDA_AVAILABLE:
-    CORE_TOOLS.extend([
-        lightpanda_fetch_page,
-        lightpanda_execute_js,
-        lightpanda_screenshot,
-        lightpanda_extract_data,
-        lightpanda_health_check,
-    ])
 
 # Add remaining tools
 CORE_TOOLS.extend([

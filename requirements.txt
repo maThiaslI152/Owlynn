@@ -19,7 +19,6 @@ python-docx
 python-pptx
 tabulate
 # Browser and web tools
-lightpanda>=0.1.0
 duckduckgo-search>=6.0
 playwright>=1.40.0
 beautifulsoup4>=4.12.0

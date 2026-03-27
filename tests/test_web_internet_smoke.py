@@ -39,10 +39,6 @@ async def test_web_search_general_fallback_chain_mocked(monkeypatch):
         calls.append("wttr")
         return None
 
-    async def lightpanda(query: str, backend: str, news: bool, focus_query: str = ""):
-        calls.append("lightpanda")
-        return None
-
     async def ddg_http(query: str, backend: str, news: bool, focus_query: str = ""):
         calls.append("ddg_http")
         return None
@@ -61,7 +57,6 @@ async def test_web_search_general_fallback_chain_mocked(monkeypatch):
     monkeypatch.setattr(web_tools, "_web_search_api_serper", serper_api)
     monkeypatch.setattr(web_tools, "_web_search_api_tavily", tavily_api)
     monkeypatch.setattr(web_tools, "_web_search_curl_cffi", curl_search)
-    monkeypatch.setattr(web_tools, "_web_search_lightpanda_ddg_html", lightpanda)
     monkeypatch.setattr(web_tools, "_web_search_httpx_ddg_html", ddg_http)
     monkeypatch.setattr(web_tools, "_web_search_bing_httpx", bing)
     monkeypatch.setattr(web_tools, "_candidate_providers", lambda backend: ["brave", "serper", "tavily"])
@@ -74,7 +69,6 @@ async def test_web_search_general_fallback_chain_mocked(monkeypatch):
         "serper_api",
         "tavily_api",
         "curl_cffi",
-        "lightpanda",
         "ddg_http",
         "bing",
     ]
@@ -106,10 +100,6 @@ async def test_web_search_news_flow_mocked(monkeypatch):
         calls.append("curl_cffi")
         return None, web_tools.SearchAttempt("tier1", "curl_cffi", "empty")
 
-    async def lightpanda(query: str, backend: str, news: bool, focus_query: str = ""):
-        calls.append("lightpanda")
-        return None
-
     async def ddg_http(query: str, backend: str, news: bool, focus_query: str = ""):
         calls.append("ddg_http")
         return None
@@ -132,7 +122,6 @@ async def test_web_search_news_flow_mocked(monkeypatch):
     monkeypatch.setattr(web_tools, "_web_search_api_serper", serper_api)
     monkeypatch.setattr(web_tools, "_web_search_api_tavily", tavily_api)
     monkeypatch.setattr(web_tools, "_web_search_curl_cffi", curl_search)
-    monkeypatch.setattr(web_tools, "_web_search_lightpanda_ddg_html", lightpanda)
     monkeypatch.setattr(web_tools, "_web_search_httpx_ddg_html", ddg_http)
     monkeypatch.setattr(web_tools, "_web_search_bing_httpx", bing)
     monkeypatch.setattr(web_tools, "_web_search_ddg_lite_httpx", ddg_lite)
@@ -148,7 +137,6 @@ async def test_web_search_news_flow_mocked(monkeypatch):
         "serper_api",
         "tavily_api",
         "curl_cffi",
-        "lightpanda",
         "ddg_http",
         "bing",
         "ddg_lite",

@@ -2,7 +2,7 @@
 Web Tools: Search + Fetch (Overhauled)
 --------------------------------------
 web_search           : Tiered reliability pipeline:
-                       Tier 1 (API/curl_cffi) -> Tier 2 (Lightpanda/DDGS/httpx) -> Tier 3 (Playwright).
+                       Tier 0.5 (SearXNG) -> Tier 1 (API/curl_cffi) -> Tier 2 (DDGS/httpx) -> Tier 3 (Playwright).
                        Weather (wttr.in) remains a dedicated fast path.
 fetch_webpage        : Static fetching via httpx + BeautifulSoup
 fetch_webpage_dynamic: Dynamic fetching via Playwright
@@ -591,50 +591,10 @@ async def _maybe_rerank_search_hits(
     return await rerank_search_hits(fq, hits)
 
 
-async def _web_search_lightpanda_ddg_html(
-    query: str, backend: str, news: bool, focus_query: str = ""
-) -> str | None:
-    """Load DuckDuckGo HTML in Lightpanda and parse titles/links."""
-    from src.tools.lightpanda_tool import get_lightpanda_browser
-
-    url = _ddg_html_url(query, news)
-    browser = await get_lightpanda_browser()
-    if not browser:
-        return None
-
-    tab = await browser.new_tab()
-    try:
-        await asyncio.wait_for(tab.goto(url), timeout=45)
-        try:
-            await asyncio.wait_for(tab.wait_for_navigation(), timeout=12)
-        except Exception:
-            pass
-        html = await tab.get_html()
-    except Exception as e:
-        logger.warning("Lightpanda DDG search failed: %s", e)
-        return None
-    finally:
-        try:
-            await tab.close()
-        except Exception:
-            pass
-
-    if detect_bot_block(html):
-        logger.warning("Lightpanda DDG received challenge page")
-        return None
-
-    max_h = 15 if (focus_query or "").strip() else 5
-    results = _parse_ddg_html_results(html, max_hits=max_h)
-    if not results:
-        return None
-    results = await _maybe_rerank_search_hits(focus_query, results)
-    return _format_ddg_hits(query, backend, news, results, "via Lightpanda")
-
-
 async def _web_search_httpx_ddg_html(
     query: str, backend: str, news: bool, focus_query: str = ""
 ) -> str | None:
-    """Plain HTTP GET to DDG HTML lite — works without Lightpanda or duckduckgo-search."""
+    """Plain HTTP GET to DDG HTML lite."""
     import httpx
 
     url = _ddg_html_url(query, news)
@@ -811,7 +771,7 @@ async def web_search(
     """
     Searches the web and returns top results.
 
-    Order: Lightpanda (DDG HTML) → duckduckgo-search (DDGS) → plain HTTP to DDG HTML.
+    Order: SearXNG → API providers → curl_cffi → DDGS → httpx → Playwright.
     ``backend="google"`` uses Playwright only.
 
     Use this to look up current information, documentation, definitions, or
@@ -877,13 +837,7 @@ async def web_search(
         if curl_out:
             return curl_out
 
-        # Tier 2A: Lightpanda headless HTML
-        lp = await _web_search_lightpanda_ddg_html(query, backend, news, focus_query)
-        attempts.append(SearchAttempt("tier2", "lightpanda", "ok" if lp else "empty"))
-        if lp:
-            return lp
-
-        # Tier 2B: DDGS API
+        # Tier 2: DDGS API
         DDGS = _get_ddgs_class()
         if DDGS is not None:
             try:

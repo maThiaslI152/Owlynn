@@ -30,7 +30,6 @@ If you are modifying code, use this order:
     *   **[LLM Chat Prompt Test](docs/guides/llm_chat_prompt_test.md)**: Manual verification prompts for routing, memory, and tool behavior.
     *   **[LM Studio / Qwen Jinja](docs/guides/lm_studio.md)**: Fixing “No user query found in messages” with local inference.
     *   **[File Formats](docs/guides/file_formats.md)**: Supported document types and processing.
-    *   **[Browser Automation](docs/guides/lightpanda.md)**: setup and use Lightpanda for dynamic crawling.
     *   **[M4 Deployment](docs/guides/m4_deployment.md)**: Optimization strategies for Apple Silicon Macs.
     *   **[Personal Assistant Memory](docs/guides/personal_assistant_memory.md)**: Overview of topic/intensity tracking.
 *   **Technical Notes**:
@@ -113,13 +112,7 @@ Open your browser and navigate to:
 - **search_workspace_files**: Search file contents
 - **web_search**: Metasearch across search engines
 - **fetch_webpage**: Fetch pages (static HTTP)
-
-### Browser Automation (Lightpanda)
-- **lightpanda_fetch_page**: Render dynamic pages with JavaScript
-- **lightpanda_execute_js**: Run custom JavaScript on pages  
-- **lightpanda_screenshot**: Capture webpage screenshots
-- **lightpanda_extract_data**: Scrape structured data with CSS selectors
-- **lightpanda_health_check**: Verify Lightpanda installation
+- **fetch_webpage_dynamic**: Render JavaScript pages (Playwright)
 
 ### Memory & Knowledge
 - **remember_fact**: Store cross-session memories
@@ -149,4 +142,3 @@ For a full list of supported formats and processing details, see:
 The interface supports syntax highlighting, tool execution status cards, rich formatting, and error displays.
 
 For details on the upgrades, see the **[Frontend Update Guide](docs/guides/frontend_update.md)**.
-For browser automation details, see **[Browser Automation (Lightpanda)](docs/guides/lightpanda.md)**.

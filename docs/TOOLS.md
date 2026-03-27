@@ -38,8 +38,6 @@ The repo contains additional tool implementations beyond the small set above, fo
   - `execute_sandboxed_shell`
 - workspace file editing helpers:
   - `write_workspace_file`, `edit_workspace_file`, `delete_workspace_file`, etc.
-- Lightpanda browser automation tools (optional dependency):
-  - `lightpanda_fetch_page`, `lightpanda_execute_js`, `lightpanda_screenshot`, ...
 
 `fetch_webpage` is part of `COMPLEX_TOOLS_WITH_WEB` (wired in `tool_sets.py`). Other tools are only usable by the model if explicitly added to the complex tool sets.
 
