@@ -94,6 +94,17 @@ async def router_node(state: AgentState) -> AgentState:
     user_text = _last_user_text(state)
     user_lower = user_text.lower()
 
+    # If the conversation already used tools or the large model, stay on complex.
+    # This prevents follow-up questions from dropping back to the small model mid-conversation.
+    if len(messages) > 2:
+        has_tool_history = any(
+            getattr(m, "type", None) == "tool" or hasattr(m, "tool_calls") and m.tool_calls
+            for m in messages[:-1]  # exclude the current user message
+        )
+        if has_tool_history:
+            logger.info("[router] Complex path — conversation has tool history")
+            return {"route": "complex"}
+
     web_on = state.get("web_search_enabled")
     if web_on is None:
         web_on = True
