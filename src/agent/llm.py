@@ -27,7 +27,7 @@ class LLMPool:
                     if cls._small_llm is None:
                         profile = get_profile()
                         base_url = profile.get("small_llm_base_url", "http://127.0.0.1:1234/v1")
-                        model = profile.get("small_llm_model_name", "jackrong-qwen3.5-2b-claude-reasoning-abliterated-mxfp8-mlx")
+                        model = profile.get("small_llm_model_name", "liquid/lfm2.5-1.2b")
                         cls._small_llm = ChatOpenAI(
                             model=model,
                             api_key="sk-local-no-key-needed",
@@ -39,7 +39,7 @@ class LLMPool:
             except Exception:
                 profile = get_profile()
                 base_url = profile.get("small_llm_base_url", "http://127.0.0.1:1234/v1")
-                model = profile.get("small_llm_model_name", "jackrong-qwen3.5-2b-claude-reasoning-abliterated-mxfp8-mlx")
+                model = profile.get("small_llm_model_name", "liquid/lfm2.5-1.2b")
                 return ChatOpenAI(
                     model=model,
                     api_key="sk-local-no-key-needed",

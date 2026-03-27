@@ -18,7 +18,7 @@ _DEFAULTS = {
     "llm_base_url": "http://127.0.0.1:1234/v1",
     "llm_model_name": "qwen/qwen3.5-9b",
     "small_llm_base_url": "http://127.0.0.1:1234/v1",
-    "small_llm_model_name": "jackrong-qwen3.5-2b-claude-reasoning-abliterated-mxfp8-mlx",
+    "small_llm_model_name": "liquid/lfm2.5-1.2b",
     "large_llm_base_url": "http://127.0.0.1:1234/v1",
     "large_llm_model_name": "qwen/qwen3.5-9b",
     # New system settings
