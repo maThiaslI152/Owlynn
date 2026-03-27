@@ -1,76 +1,77 @@
 # Architecture Overview
 
-Owlynn is a local-first autonomous agent built with **LangGraph** for orchestration and **FastAPI** for the backend, serving a single-page frontend. It is optimized for local inference (e.g., on Apple Silicon).
+Owlynn is a local-first AI productivity agent built with **LangGraph** for orchestration and **FastAPI** for the backend. Optimized for Apple Silicon (M4 Air 24GB) with dual-LLM architecture.
 
 ## Core Components
 
 ### 1. Orchestrator (LangGraph)
-The core logic resides in `src/agent/graph.py`. It uses a stateful graph with a fast `simple` path and a secure cyclic `complex` path.
 
-#### Execution Flow
-```mermaid
-graph TD
-    START -->|Entry| MI[memory_inject]
-    MI -->|Enrich Context| R[router]
-    R -->|Conditional Edge| S[simple]
-    R -->|Conditional Edge| CL[complex_llm]
-    S --> MW[memory_write]
-    CL -->|No tool calls| MW
-    CL -->|Tool calls| SP[security_proxy]
-    SP -->|Approved| TA[tool_action]
-    SP -->|Denied| MW
-    TA --> CL
-    MW --> END
+```
+memory_inject → router → simple → memory_write → END
+                       → complex_llm ↔ security_proxy ↔ tool_action → memory_write → END
 ```
 
-*   **`memory_inject`**: Loads short-term and long-term context prior to reasoning.
-*   **`router`**: Uses logic or a smaller model to determine if the query is **Simple** or **Complex**.
-*   **`simple`**: Handles quick questions, chit-chat, or direct answers.
-*   **`complex_llm`**: Handles multi-step reasoning and coding using the **large** model. When `mode` is `tools_on` (default), the model is invoked **with tools bound** (workspace read, sandbox Python, memory recall, and web tools when enabled). It may emit tool calls.
-*   **`security_proxy`**: Mandatory gate before tool execution. Reviews/approves pending tool calls.
-*   **`tool_action`**: Executes approved tool calls via `ToolNode`, then loops back to `complex_llm` for the next reasoning step.
-*   **`response_style`**: Optional chat payload (`normal`, `learning`, `concise`, `explanatory`, `formal`) appends short system hints on both **simple** and **complex** paths.
-*   **`memory_write`**: Persists new facts and updates state.
+- **memory_inject**: Loads user profile, persona, topics, interests, and long-term memory context.
+- **router**: LFM2.5-1.2B classifies as `simple` or `complex`. Keyword heuristics bypass LLM for obvious cases. Conversations with tool history stay on `complex`.
+- **simple**: LFM2.5-1.2B gives short direct answers. No tools. Falls back to large model on failure.
+- **complex_llm**: Qwen3.5-9B with 20 tools bound. Emits tool calls or direct answers.
+- **security_proxy**: Gates sensitive tools (file write/edit/delete, notebook). Auto-approves safe tools.
+- **tool_action**: Executes approved tool calls via ToolNode, loops back to complex_llm.
+- **memory_write**: Extracts topics/interests, saves to Mem0/ChromaDB, invalidates cache.
 
-Note: the repo still contains `tool_selector` / `tool_executor` nodes, but the active graph wiring is `memory_inject -> router -> (simple | complex_llm)` with secure cyclic tool flow through `security_proxy` and `tool_action`.
+### 2. Dual-LLM Architecture
 
-#### Why tools sometimes seemed “missing”
-*   The **`simple`** path (router keyword match for `hi`, `hello`, `thanks`, etc., or the small model choosing `simple`) uses the small LLM with an explicit **“do not use tools”** prompt — no `web_search`.
-*   **`complex`** previously called the large LLM **without** `bind_tools`, so the assistant could honestly behave as if it had no web access even though `web_search` existed in the codebase. That path is now aligned: `tools_on` + complex flow uses tool-bound calls (tool lists are defined in `src/agent/tool_sets.py`).
-*   **Local OpenAI-compatible servers** must support function/tool calling for `web_search` to fire; if the model ignores tool schemas, you will still get text-only answers.
+| Model | Role | Size | Speed |
+|-------|------|------|-------|
+| LFM2.5-1.2B (GGUF Q4_K_M) | Routing, simple answers, chat titles | 730MB | ~700 tok/s prompt, ~110 tok/s gen |
+| Qwen3.5-9B (GGUF Q6_K) | Complex reasoning, tool calling | 8.3GB | ~130 tok/s prompt, ~9 tok/s gen |
 
-### 2. Dual-LLM Architecture (`src/agent/llm.py`)
-Owlynn optimizes local inference performance by routing queries between two distinct models:
+Both served via LM Studio on port 1234 (OpenAI-compatible API).
 
-*   **Small Model (`nvidia/nemotron-3-nano-4b`)**:
-    *   **Role**: Handles routing decisions (`router` node) and quick answers (`simple` node).
-    *   **Benefit**: Extremely low latency, minimal memory footprint.
-*   **Large Model (`qwen/qwen3.5-9b`)**:
-    *   **Role**: Deep reasoning, complex instructions, and has tools bound for execution (`complex` node).
-    *   **Benefit**: Advanced capability for analytical tasks.
+### 3. Tools (20 bound to LLM)
 
-### 3. State Management (`src/agent/state.py`)
-The `AgentState` manages the conversation lifecycle:
-*   `messages`: Conversation history.
-*   `extracted_facts`: New facts learned during the turn.
-*   `long_term_context`: Retrieved from VectorDB.
-*   `route`: Target path (`simple` or `complex`), set by `router`.
-*   `pending_tool_calls` / `execution_approved`: Tracks secure cyclic tool flow state between `complex_llm`, `security_proxy`, and `tool_action`.
-*   `selected_tool` / `tool_result`: Present for legacy tool-selector flow (not used by active graph wiring).
+**Web**: web_search (SearXNG → DDG → Bing), fetch_webpage
+**Files**: read, write, edit, list, delete workspace files
+**Documents**: create_docx, create_xlsx, create_pptx, create_pdf
+**Compute**: notebook_run, notebook_reset (in-process Python REPL)
+**Memory**: recall_memories
+**Tasks**: todo_add, todo_list, todo_complete
+**Skills**: list_skills, invoke_skill (11 productivity templates)
+**HITL**: ask_user (with choice buttons)
 
-### 4. Backend API (`src/api/server.py`)
-A **FastAPI** server exposes REST endpoints and a WebSocket handler for real-time interaction.
+### 4. Skills System
 
-*   **WebSocket (`/ws/chat/{thread_id}`)**: Handles streaming responses from the LangGraph execution.
-    For the frontend/backend JSON contract, see [Chat & Events Protocol](CHAT_PROTOCOL.md).
-*   **File Management**: Operations (`/api/files`, `/api/upload`) tied to the sandboxed workspace.
-*   **Settings**: Modular tabs for Profile, System Prompts, Memory Toggle, and Inference parameters.
-*   **Personal Assistant**: Endpoints for topics, interests, and conversation summarization.
+Reusable prompt templates in `skills/*.md`. Zero token cost until invoked.
+Triggers match user intent keywords. Currently: research, summarize, briefing,
+comparison, visualization, meeting notes, email, report, presentation, rewriter, brainstorm.
 
-### 5. Memory System
-*   **Short-term**: LangGraph checkpointer (`MemorySaver` by default, with best-effort fallback to `AsyncRedisSaver` when Redis is available).
-*   **Long-term**: Mem0 (personal assistant topic/interest extraction + enriched facts) and the local memory retrieval used by `memory_inject`.
-*   **Data files**: Lightweight JSON storage (`data/`) for topics, interests, and history.
+### 5. Web Search Pipeline
 
----
-*For guides on specific features, refer to the [guides/](../docs/guides) directory.*
+```
+Tier 0:   wttr.in (weather fast path)
+Tier 0.5: SearXNG (self-hosted, localhost:8888)
+Tier 1A:  Brave/Serper/Tavily APIs (if keys set)
+Tier 1B:  curl_cffi (DDG/Bing HTML scraping)
+Tier 2:   DDGS Python library / httpx fallbacks
+Tier 3:   Playwright (full browser)
+```
+
+### 6. Memory System
+
+- **Short-term**: LangGraph checkpointer (MemorySaver or Redis)
+- **Long-term**: Mem0 + ChromaDB (multilingual-e5-small embeddings)
+- **Data files**: JSON storage for topics, interests, conversations, todos
+
+### 7. Frontend
+
+- Tauri desktop app loading from FastAPI (http://127.0.0.1:8000)
+- Vanilla HTML/JS/CSS with Tailwind utilities
+- All dependencies vendored locally (offline-capable)
+- WebSocket streaming for real-time responses
+- Tool execution cards, ask-user with choice buttons, thinking suppression
+
+### 8. Infrastructure
+
+- **Docker Compose**: Redis, ChromaDB, SearXNG
+- **LM Studio**: Local LLM inference server
+- **No sandbox/container needed for tool execution** — all tools run natively

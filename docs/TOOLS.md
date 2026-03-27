@@ -1,75 +1,75 @@
-# Tools & Tool Binding (Developer Reference)
+# Tools Reference
 
-This document explains which tools are available to the agent *in practice* and how that is reflected in the UI.
+## LLM-Bound Tools (20)
 
-## 1) Tool sets bound by the active graph
+These tools are bound to the Qwen3.5-9B model via `src/agent/tool_sets.py`.
 
-The current LangGraph graph (`src/agent/graph.py`) routes only to:
-- `simple` (small model)
-- `complex_llm` / `tool_action` (large model + ToolNode cycle)
+### Web
+| Tool | Description |
+|------|-------------|
+| `web_search` | Search via SearXNG/DDG/Bing. Supports `focus_query` for reranking. |
+| `fetch_webpage` | Fetch URL content. Embedding-ranked excerpts with `focus_query`. |
 
-`simple` does not bind tools and also uses a system prompt that tells the model: *“Do not use tools.”*
+### File Management
+| Tool | Description |
+|------|-------------|
+| `read_workspace_file` | Read file content. Checks `.processed/` cache for PDFs. Fuzzy filename matching. |
+| `write_workspace_file` | Create or overwrite a file. |
+| `edit_workspace_file` | Search-and-replace in a file. Exact pattern match required. |
+| `list_workspace_files` | List directory contents with file sizes. |
+| `delete_workspace_file` | Delete a file. |
 
-The complex cycle binds a curated list of tools depending on `web_search_enabled`, using:
-- `src/agent/tool_sets.py`:
-  - `COMPLEX_TOOLS_WITH_WEB`
-  - `COMPLEX_TOOLS_NO_WEB`
+### Document Generation
+| Tool | Description |
+|------|-------------|
+| `create_docx` | Word document with headings, bullets, numbered lists. |
+| `create_xlsx` | Excel spreadsheet from CSV-like text. First row = headers. |
+| `create_pptx` | PowerPoint with slides separated by `---`. |
+| `create_pdf` | PDF from text content via PyMuPDF. |
 
-Concretely, the large model receives:
+### Computation
+| Tool | Description |
+|------|-------------|
+| `notebook_run` | Stateful Python REPL. Variables persist between calls. |
+| `notebook_reset` | Clear all notebook variables. |
 
-- With web:
-  - `web_search` (optional `focus_query` for snippet reranking)
-  - `fetch_webpage` (optional `focus_query` for excerpt ranking on long pages; SSRF-safe URLs only)
-  - `execute_python_code`
-  - `read_workspace_file`
-  - `recall_memories`
-- Without web:
-  - `execute_python_code`
-  - `read_workspace_file`
-  - `recall_memories`
+### Memory
+| Tool | Description |
+|------|-------------|
+| `recall_memories` | Search long-term memory (keyword overlap on recent 50 entries). |
 
-These come from `src/agent/nodes/complex.py` and are bound via `.bind_tools(tools)` in `complex_llm_node`, then executed via `ToolNode(tools)` in `complex_tool_action_node` (after `security_proxy` approval).
+### Task Management
+| Tool | Description |
+|------|-------------|
+| `todo_add` | Add task with priority (low/medium/high). |
+| `todo_list` | List tasks. Filter by status (all/pending/done). |
+| `todo_complete` | Mark a task as done. |
 
-## 2) Tools implemented in `src/tools/*` (broader capability)
+### Skills
+| Tool | Description |
+|------|-------------|
+| `list_skills` | List available skill templates from `skills/` directory. |
+| `invoke_skill` | Load and return a skill's prompt template. |
 
-The repo contains additional tool implementations beyond the small set above, for example:
+### Human-in-the-Loop
+| Tool | Description |
+|------|-------------|
+| `ask_user` | Ask a clarifying question. Supports 1-3 choice buttons + free text. |
 
-- sandbox command execution (Podman):
-  - `execute_sandboxed_shell`
-- workspace file editing helpers:
-  - `write_workspace_file`, `edit_workspace_file`, `delete_workspace_file`, etc.
+## Security Policy
 
-`fetch_webpage` is part of `COMPLEX_TOOLS_WITH_WEB` (wired in `tool_sets.py`). Other tools are only usable by the model if explicitly added to the complex tool sets.
+Sensitive tools require approval via `security_proxy`:
+- `write_workspace_file`
+- `edit_workspace_file`
+- `delete_workspace_file`
+- `notebook_run`
 
-## 3) Adding a new tool (the safe path)
+All other tools auto-approve. Dangerous shell patterns (rm -rf, sudo, etc.) are blocked.
 
-To make a new tool available to the large model in the current architecture:
+## Adding a New Tool
 
-1. Implement the tool as a LangChain tool (decorated with `@tool`) in `src/tools/`.
-2. Re-export it from `src/tools/__init__.py` so `src/agent/tool_sets.py` can import it.
-3. Add it to one or both tool lists in `src/agent/tool_sets.py`.
-4. Update `src/agent/nodes/complex.py` guidance text (`COMPLEX_TOOL_GUIDANCE_WEB` / `COMPLEX_TOOL_GUIDANCE_NO_WEB`) so the model knows when to use the tool.
-5. Update `docs/TOOLS.md` and any UI assumptions if the tool output shape affects rendering.
-
-## 4) How tool calls appear in the UI
-
-The frontend renders tool UI based on backend-forwarded `message` events:
-- When the AI produces tool calls, `src/api/server.py` forwards an `AIMessage` containing `tool_calls`.
-- When tools execute (via `ToolNode`), the server forwards `ToolMessage` outputs.
-
-Streaming text response is carried in separate `chunk` events.
-
-So when you modify tool execution behavior:
-- keep `serialize_message()` output compatible with `renderMessage()` expectations
-- keep tool-call output in the `message` events (not as plain text chunks)
-
-## 5) Legacy tool selector/executor nodes
-
-The repo also includes `src/agent/nodes/tool_selector.py` and `src/agent/nodes/tool_executor.py`.
-
-These are legacy code paths and are not currently part of the active compiled graph.
-
-If you rewire the graph to use them:
-- ensure state fields like `selected_tool` and `tool_result` are produced/consumed correctly
-- update this doc because the set/order of bound tools may change
-
+1. Create `@tool` function in `src/tools/`
+2. Import in `src/agent/tool_sets.py`
+3. Add to `COMPLEX_TOOLS_WITH_WEB` and/or `COMPLEX_TOOLS_NO_WEB`
+4. Update guidance text in `src/agent/nodes/complex.py`
+5. If sensitive, add to `SENSITIVE_TOOLS` in `security_proxy.py`

@@ -1,74 +1,66 @@
-# Agent Flow (LangGraph + Nodes)
+# Agent Flow (LangGraph)
 
-This reflects the current compiled graph in `src/agent/graph.py`.
+## Graph Topology
 
-## Current graph topology
+```
+START → memory_inject → router → simple → memory_write → END
+                               → complex_llm ←──────────────┐
+                                    ↓                        │
+                               security_proxy                │
+                                    ↓                        │
+                               tool_action ──────────────────┘
+                                    ↓
+                               memory_write → END
+```
 
-Nodes:
-- `memory_inject`
-- `router`
-- `simple`
-- `complex_llm`
-- `security_proxy`
-- `tool_action`
-- `memory_write`
+## Node Details
 
-Flow:
-1. `memory_inject -> router`
-2. `router -> simple` **or** `router -> complex_llm`
-3. `simple -> memory_write -> END`
-4. `complex_llm`:
-   - if no tool calls: `memory_write -> END`
-   - if tool calls: `security_proxy -> (tool_action or memory_write)`
-5. approved tool calls: `tool_action -> complex_llm` (loop)
+### memory_inject
+- Builds `memory_context` from Mem0 search + user profile + topics/interests
+- Filters out config fields (LLM URLs, tokens, etc.) from profile
+- Caches context per thread (5-min TTL)
 
-So the complex path is a secure cycle with mandatory policy/approval gate before tool execution.
+### router
+- Keyword bypass for greetings → `simple`
+- Web intent detection → `complex`
+- Conversation with tool history → stays `complex`
+- Falls back to LFM2.5-1.2B JSON classification
+- Default fallback: `complex`
 
-## Node roles
+### simple
+- LFM2.5-1.2B, no tools, no memory context in prompt
+- Strips `<think>` tags and reasoning artifacts
+- Falls back to Qwen3.5-9B on model failure
+- Injects current date and response style
 
-### `memory_inject` (`src/agent/nodes/memory.py`)
-- Builds `memory_context` and persona text.
-- Uses `MemoryContextCache` keyed by thread.
-- Pulls long-term memory search results + profile + enhanced personal assistant context.
+### complex_llm
+- Qwen3.5-9B with 20 tools bound
+- Injects current date, memory context, persona, response style
+- Strips `<think>` tags from output
+- Auto-reads workspace files when model outputs prose instead of tool calls
+- Sets `pending_tool_calls` flag for security proxy
 
-### `router` (`src/agent/nodes/router.py`)
-- Sets `route` to `simple` or `complex`.
-- Fast keyword and “web/live-data intent” heuristics first.
-- Falls back to small LLM JSON classification.
-- Safe fallback: `complex`.
+### security_proxy
+- Checks tool names against `SENSITIVE_TOOLS` set
+- Checks arguments for dangerous patterns (rm -rf, sudo, etc.)
+- Safe tools: auto-approved
+- Sensitive tools: HITL interrupt (approval modal in frontend)
+- Denied: flow exits to memory_write
 
-### `simple` (`src/agent/nodes/simple.py`)
-- Small model, short direct answers, no tools.
-- Injects `response_style` hint.
-- Returns `model_used = "small"`.
+### tool_action
+- Executes approved tool calls via LangGraph ToolNode
+- Appends fetch retry nudges for failed static fetches
+- Appends web search answer nudges for successful searches
+- Returns to complex_llm for next reasoning step
 
-### `complex_llm` (`src/agent/nodes/complex.py`)
-- Large model reasoning step for the cyclic tool flow.
-- Binds tools (unless `mode == tools_off`).
-- Sets `pending_tool_calls` when tool calls are present.
-- Applies fallback text when model output is blank.
+### memory_write
+- Records conversation via personal_assistant module
+- Extracts topics and interests
+- Saves enriched facts to Mem0/ChromaDB
+- Invalidates memory context cache
 
-### `security_proxy` (`src/agent/nodes/security_proxy.py`)
-- Reviews pending tool calls against policy/approval.
-- Sets approval state used by conditional routing.
-- On denial, flow exits to `memory_write` without tool execution.
+## Tool Binding
 
-### `tool_action` (`src/agent/nodes/complex.py::complex_tool_action_node`)
-- Executes approved tool calls via `ToolNode`.
-- Appends tool messages.
-- Can append a fetch retry nudge for weak static webpage results.
-- Returns to `complex_llm` for next reasoning step.
-
-### `memory_write` (`src/agent/nodes/memory.py`)
-- Records conversation summary/topics/interests.
-- Writes enriched facts to long-term memory.
-- Invalidates per-thread memory cache.
-
-## Tool binding source
-
-Tool lists are defined in `src/agent/tool_sets.py`:
-- `COMPLEX_TOOLS_WITH_WEB`
-- `COMPLEX_TOOLS_NO_WEB`
-
-These lists are used by both `complex_llm_node` and `complex_tool_action_node`, so keep them in sync with docs and policy.
-
+Defined in `src/agent/tool_sets.py`:
+- `COMPLEX_TOOLS_WITH_WEB` (20 tools)
+- `COMPLEX_TOOLS_NO_WEB` (18 tools, no web_search/fetch_webpage)
