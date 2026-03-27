@@ -8,7 +8,7 @@ echo ""
 
 # 1. Podman containers
 echo "[1/4] Containers..."
-if podman ps 2>/dev/null | grep -q cowork_redis; then
+if podman ps 2>/dev/null | grep -q cowork_chromadb; then
     echo "      Already running."
 else
     podman machine start 2>/dev/null

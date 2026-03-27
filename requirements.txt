@@ -2,11 +2,9 @@ langgraph
 langchain
 langchain-community
 langchain-openai
-redis
 mem0ai
 chromadb
 mcp
-langgraph-checkpoint-redis
 fastapi
 uvicorn
 websockets

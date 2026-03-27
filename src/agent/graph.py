@@ -72,12 +72,12 @@ def build_graph():
     return builder
 
 # --- Init Agent Async Wrapper ---
-from langgraph.checkpoint.memory import MemorySaver  # Optimized for M4
-from src.config.settings import MCP_CONFIG_PATH, REDIS_URL
+from langgraph.checkpoint.memory import MemorySaver
+from src.config.settings import MCP_CONFIG_PATH
 from src.tools.mcp_client import mcp_manager
 
 async def init_agent(checkpointer=None):
-    """Initializes the agent with optimized checkpointer for Mac M4."""
+    """Initializes the agent with MemorySaver checkpointer."""
     try:
         await mcp_manager.initialize(str(MCP_CONFIG_PATH))
     except Exception:
@@ -86,15 +86,6 @@ async def init_agent(checkpointer=None):
     builder = build_graph()
 
     if checkpointer is None:
-        # Use MemorySaver for M4 Air (more efficient than Redis)
-        # Falls back from Redis automatically if needed
-        try:
-            from langgraph.checkpoint.redis.aio import AsyncRedisSaver
-            checkpointer = AsyncRedisSaver(redis_url=REDIS_URL)
-            await checkpointer.asetup()
-            logger.info("[init_agent] Using Redis checkpointer")
-        except Exception as redis_err:
-            logger.warning(f"[init_agent] Redis unavailable: {redis_err}, using MemorySaver")
-            checkpointer = MemorySaver()
+        checkpointer = MemorySaver()
 
     return builder.compile(checkpointer=checkpointer)

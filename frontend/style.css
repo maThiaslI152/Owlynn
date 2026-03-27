@@ -729,3 +729,13 @@ input[type="range"] { accent-color: var(--accent); height: 6px; }
   #view-project-detail .view-page { flex-direction: column !important; }
   #projectDetailSidebar { width: 100% !important; border-left: none !important; border-top: 1px solid var(--border); }
 }
+
+.project-dropzone {
+  border: 2px dashed var(--border); border-radius: var(--radius); padding: 1.5rem;
+  text-align: center; color: var(--text-muted); font-size: 0.82rem;
+  transition: border-color var(--transition), background var(--transition);
+  margin-top: 0.75rem; cursor: pointer;
+}
+.project-dropzone:hover, .project-dropzone.drag-over {
+  border-color: var(--accent); background: var(--accent-soft);
+}

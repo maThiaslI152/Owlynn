@@ -209,6 +209,7 @@ async def memory_write_node(state: AgentState) -> AgentState:
     
     # Save enriched facts to long-term memory
     from src.memory.long_term import memory
+    mem0_uid = _get_mem0_user_id(state)
     if memory is not None:
         try:
             # Extract topics and interests from the conversation
@@ -220,11 +221,11 @@ async def memory_write_node(state: AgentState) -> AgentState:
             fact_text = f"User asked: {last_human}. AI answered: {last_ai}"
             enriched_fact = MemoryEnricher.enrich_memory(fact_text, topics, interests)
             
-            # Save to Mem0 with enriched metadata
+            # Save to Mem0 with STABLE user id (shared across all threads)
             await asyncio.to_thread(
                 memory.add, 
                 fact_text, 
-                user_id=thread_id, 
+                user_id=mem0_uid, 
                 infer=True
             )
             

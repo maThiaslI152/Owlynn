@@ -3665,6 +3665,35 @@ function openProjectDetail(projectId) {
         switchProject(projectId, false);
         document.getElementById('workspaceFileInput')?.click();
     };
+
+    // Drag-drop on files section
+    const dropZone = document.getElementById('projectDropZone');
+    const filesCard = document.getElementById('projectFilesCard');
+    if (dropZone && filesCard) {
+        filesCard.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+        filesCard.addEventListener('dragleave', () => { dropZone.classList.remove('drag-over'); });
+        filesCard.addEventListener('drop', async (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('drag-over');
+            const files = e.dataTransfer?.files;
+            if (!files?.length) return;
+            switchProject(projectId, false);
+            for (const file of files) {
+                const formData = new FormData();
+                formData.append('file', file);
+                try {
+                    await fetch(`${API_BASE}/api/upload?sub_path=&project_id=${projectId}`, { method: 'POST', body: formData });
+                } catch (_) {}
+            }
+            // Refresh
+            await loadProjects();
+            openProjectDetail(projectId);
+        });
+        dropZone.onclick = () => {
+            switchProject(projectId, false);
+            document.getElementById('workspaceFileInput')?.click();
+        };
+    }
     document.getElementById('projectSendBtn').onclick = () => {
         const input = document.getElementById('projectInput');
         const text = input?.value?.trim();

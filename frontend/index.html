@@ -253,54 +253,59 @@
 
     <!-- View: Project Detail (inside a project) -->
     <div id="view-project-detail" class="view">
-      <div class="view-page" style="max-width:100%;display:flex;gap:0">
-        <!-- Left: project content -->
-        <div style="flex:1;max-width:720px;padding:1.5rem">
-          <button id="projectBackBtn" class="link-btn" style="margin-bottom:0.75rem;font-size:0.82rem">← All projects</button>
-          <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:0.25rem">
-            <h2 id="projectDetailName" style="font-size:1.5rem;font-weight:700"></h2>
-            <div style="display:flex;gap:0.25rem">
-              <button id="projectDetailMenu" class="icon-btn" title="More">···</button>
-              <button id="projectDetailPin" class="icon-btn" title="Pin">☆</button>
+      <div class="view-page" style="max-width:800px">
+        <button id="projectBackBtn" class="link-btn" style="margin-bottom:0.75rem;font-size:0.82rem">← All projects</button>
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:0.25rem">
+          <h2 id="projectDetailName" style="font-size:1.5rem;font-weight:700"></h2>
+          <div style="display:flex;gap:0.25rem">
+            <button id="projectDetailMenu" class="icon-btn" title="More">···</button>
+            <button id="projectDetailPin" class="icon-btn" title="Pin">☆</button>
+          </div>
+        </div>
+        <p id="projectDetailDesc" style="font-size:0.85rem;color:var(--text-muted);margin-bottom:1.25rem"></p>
+
+        <!-- Composer -->
+        <div class="welcome-composer" style="margin-bottom:1.5rem">
+          <textarea id="projectInput" rows="2" placeholder="How can I help you today?"></textarea>
+          <div class="composer-bar">
+            <div class="composer-left">
+              <button type="button" class="icon-btn" onclick="document.getElementById('fileInput')?.click()">+</button>
+            </div>
+            <div class="composer-right">
+              <button type="button" id="projectStyleBtn" class="style-pill"><span>Normal</span></button>
+              <button type="button" id="projectSendBtn" class="send-btn">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+              </button>
             </div>
           </div>
-          <p id="projectDetailDesc" style="font-size:0.85rem;color:var(--text-muted);margin-bottom:1.25rem"></p>
-
-          <!-- Composer -->
-          <div class="welcome-composer" style="margin-bottom:1.5rem">
-            <textarea id="projectInput" rows="2" placeholder="How can I help you today?"></textarea>
-            <div class="composer-bar">
-              <div class="composer-left">
-                <button type="button" class="icon-btn" onclick="document.getElementById('fileInput')?.click()">+</button>
-              </div>
-              <div class="composer-right">
-                <button type="button" id="projectStyleBtn" class="style-pill"><span>Normal</span></button>
-                <button type="button" id="projectSendBtn" class="send-btn">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <!-- Recent project chats -->
-          <div id="projectDetailChats"></div>
         </div>
 
-        <!-- Right: instructions + files sidebar -->
-        <div style="width:300px;flex-shrink:0;border-left:1px solid var(--border);padding:1.25rem;overflow-y:auto" id="projectDetailSidebar">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem">
-            <span style="font-size:0.85rem;font-weight:600">Instructions</span>
-            <button id="projectEditInstructions" class="icon-btn" style="width:24px;height:24px;font-size:0.8rem" title="Edit">+</button>
-          </div>
-          <p id="projectDetailInstructions" style="font-size:0.8rem;color:var(--text-muted);margin-bottom:1.25rem;line-height:1.5"></p>
+        <!-- Recent project chats -->
+        <div id="projectDetailChats" style="margin-bottom:2rem"></div>
 
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem">
-            <span style="font-size:0.85rem;font-weight:600">Files</span>
-            <button id="projectUploadFile" class="icon-btn" style="width:24px;height:24px;font-size:0.8rem" title="Upload">+</button>
+        <!-- Instructions section -->
+        <div class="card" style="margin-bottom:1rem">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <span style="font-size:0.9rem;font-weight:600">Instructions</span>
+            <button id="projectEditInstructions" class="icon-btn" style="width:28px;height:28px;font-size:0.9rem" title="Edit">+</button>
           </div>
-          <div id="projectDetailFiles" style="font-size:0.8rem"></div>
+          <p id="projectDetailInstructions" style="font-size:0.82rem;color:var(--text-muted);margin-top:0.5rem;line-height:1.5"></p>
+        </div>
+
+        <!-- Files section with drag-drop -->
+        <div class="card" id="projectFilesCard">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem">
+            <span style="font-size:0.9rem;font-weight:600">Files</span>
+            <button id="projectUploadFile" class="icon-btn" style="width:28px;height:28px;font-size:0.9rem" title="Upload">+</button>
+          </div>
+          <div id="projectDetailFiles" style="font-size:0.82rem;min-height:60px"></div>
+          <div id="projectDropZone" class="project-dropzone">
+            Drop files here to upload
+          </div>
         </div>
       </div>
+      <!-- Right side reserved for future split file viewer -->
+      <div id="projectDetailSidebar" class="hidden"></div>
     </div>
 
     <!-- View: Customize -->

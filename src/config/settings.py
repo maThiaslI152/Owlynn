@@ -32,7 +32,6 @@ HOST = "0.0.0.0"
 PORT = 8000
 
 # External Services
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 CHROMADB_HOST = os.getenv("CHROMADB_HOST", "localhost")
 CHROMADB_PORT = int(os.getenv("CHROMADB_PORT", 8100))
 
@@ -93,7 +92,6 @@ M4_MAC_OPTIMIZATION = {
         "cache_cleanup": 600,    # Clean old cache entries every 10 min
     },
     "checkpoint": {
-        "use_redis": False,      # MemorySaver for M4 (no Redis overhead)
         "memory_cleanup_interval": 3600,  # Clean old threads hourly
     },
     "routing": {

@@ -55,7 +55,7 @@ Reusable prompt templates in `skills/`. Zero token cost until invoked.
 
 - Python 3.12+
 - LM Studio with both models loaded
-- Podman (for Redis, ChromaDB, SearXNG containers)
+- Podman (for ChromaDB, SearXNG containers)
 - Rust & Cargo (for Tauri desktop app)
 
 ## Documentation

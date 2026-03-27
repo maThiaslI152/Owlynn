@@ -685,7 +685,7 @@ async def api_delete_project(project_id: str):
 
 @app.get("/api/history/{thread_id}")
 async def api_get_history(thread_id: str):
-    """Retrieves full chat history for a specific thread from Redis."""
+    """Retrieves full chat history for a specific thread."""
     try:
         agent = app.state.agent
         if not agent:

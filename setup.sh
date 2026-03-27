@@ -5,15 +5,11 @@ set -e
 echo "Starting local environment setup..."
 
 # 1. Start support services manually via podman run
-echo "Starting Podman services (Redis, ChromaDB)..."
+echo "Starting Podman services (ChromaDB)..."
 
 # Stop existing if they exist
-podman stop cowork_redis cowork_chromadb 2>/dev/null || true
-podman rm cowork_redis cowork_chromadb 2>/dev/null || true
-
-# Start Redis
-echo "Starting Redis..."
-podman run -d --name cowork_redis -p 6379:6379 -v cowork_redis_data:/data redis:alpine
+podman stop cowork_chromadb 2>/dev/null || true
+podman rm cowork_chromadb 2>/dev/null || true
 
 # Start ChromaDB
 echo "Starting ChromaDB..."
