@@ -107,11 +107,18 @@ def format_memory_context(results: list, profile: dict, enhanced_context: str = 
         lines.append("=== Your Knowledge About User ===")
         lines.append(enhanced_context)
     
-    # Add user profile
+    # Add user profile (only human-relevant fields, not config)
+    _PROFILE_SKIP = {
+        'system_prompt', 'custom_instructions', 'llm_base_url', 'llm_model_name',
+        'small_llm_base_url', 'small_llm_model_name', 'large_llm_base_url', 'large_llm_model_name',
+        'temperature', 'top_p', 'max_tokens', 'top_k', 'streaming_enabled',
+        'show_thinking', 'show_tool_execution', 'lm_studio_fold_system',
+        'short_term_enabled', 'long_term_enabled', 'domains_of_interest',
+    }
     if profile:
          lines.append("\n=== User Profile ===")
          for k, v in profile.items():
-              if v and k not in ['system_prompt', 'llm_base_url', 'llm_model_name']:
+              if v and k not in _PROFILE_SKIP:
                   lines.append(f"  {k}: {v}")
     
     # Add relevant past context

@@ -32,39 +32,35 @@ Tool discipline: You have native function/tool calling in this API. Whenever you
 
 COMPLEX_TOOL_GUIDANCE_WEB = (
     """
-You can call tools when they help answer the user accurately. For web questions, use a frontier-style workflow:
+You have tools to help answer accurately. Use them when needed:
 
-1) web_search: Find candidate pages. Pass focus_query with the user's precise information need when it differs from the search keywords — results will be reranked for relevance.
-2) fetch_webpage: Open URLs **exactly as listed** under each search hit (do not invent URLs from titles). Always pass focus_query so long pages return ranked excerpts with [1], [2], … for citation. If static fetch returns almost no text or says to use dynamic fetch, call **fetch_webpage_dynamic** on the same URL or switch to another hit from web_search.
-3) read_workspace_file: Read a file from the user's workspace when relevant.
-4) execute_python_code: Run calculations or short scripts in the sandbox (non-interactive: never use input(); use fixed args or literals).
-5) recall_memories: Search stored long-term memories about the user.
-6) notebook_run / notebook_vars / notebook_reset: Stateful Python REPL — variables persist between calls. Use for iterative data exploration and analysis.
-7) create_docx / create_xlsx / create_pptx / create_pdf: Generate documents in the workspace.
-8) todo_add / todo_list / todo_complete / todo_remove: Manage a persistent task list.
-9) list_skills / invoke_skill: Use reusable prompt templates for common workflows.
-10) ask_user: Ask the user a clarifying question when you need more information.
+1) web_search: Find info online. Pass focus_query for relevance ranking.
+2) fetch_webpage: Open URLs from search results. Pass focus_query for ranked excerpts.
+3) read_workspace_file: Read files from the user's workspace.
+4) execute_python_code: Run Python in sandbox (non-interactive, no input()).
+5) recall_memories: Search long-term memories about the user.
+6) notebook_run: Stateful Python REPL — variables persist between calls.
+7) todo_add / todo_list: Manage the user's task list.
+8) ask_user: Ask a clarifying question when you need more info.
 
-Answer rules after tools return:
-- Ground claims in tool output only; do not invent facts, URLs, or quotes.
-- Use numbered citations [1], [2] in the answer that match excerpt numbers from fetch_webpage when you used them; include the source URL at least once per citation family.
-- If sources disagree, say so briefly. If tools returned nothing useful, say you could not verify online and avoid fabricating."""
+Rules:
+- Ground claims in tool output only. Do not invent facts or URLs.
+- Use [1], [2] citations from fetch_webpage excerpts.
+- If tools return nothing useful, say so honestly."""
     + _TOOL_CALL_DISCIPLINE
 )
 
 COMPLEX_TOOL_GUIDANCE_NO_WEB = (
     """
-You can call tools when they help answer the user accurately (web search is turned off for this chat — do not call web_search; use workspace files, sandbox Python, and memory tools only):
-- read_workspace_file: Read a file from the user's workspace when relevant.
-- execute_python_code: Run calculations or short scripts in the sandbox (non-interactive: never use input(); use fixed args or literals).
-- recall_memories: Search stored long-term memories about the user.
-- notebook_run / notebook_vars / notebook_reset: Stateful Python REPL for iterative data exploration.
-- create_docx / create_xlsx / create_pptx / create_pdf: Generate documents in the workspace.
-- todo_add / todo_list / todo_complete / todo_remove: Manage a persistent task list.
-- list_skills / invoke_skill: Use reusable prompt templates for common workflows.
-- ask_user: Ask the user a clarifying question when you need more information.
+You have tools (web search is off for this chat):
+1) read_workspace_file: Read files from workspace.
+2) execute_python_code: Run Python in sandbox (non-interactive).
+3) recall_memories: Search long-term memories.
+4) notebook_run: Stateful Python REPL.
+5) todo_add / todo_list: Manage tasks.
+6) ask_user: Ask a clarifying question.
 
-After tools return, summarize results clearly for the user."""
+Summarize tool results clearly for the user."""
     + _TOOL_CALL_DISCIPLINE
 )
 
