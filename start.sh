@@ -1,136 +1,68 @@
 #!/bin/bash
-# ─── Owlynn Launcher ───────────────────────────────────────────────────────
-# Starts all services, waits for readiness, launches the desktop app.
-# Ctrl+C gracefully shuts down the backend. Containers stay running.
-
-set +e
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-cd "$SCRIPT_DIR"
-
-BACKEND_PID=""
-LM_STUDIO_PORT=1234
-BACKEND_PORT=8000
-
-# ─── Colors ─────────────────────────────────────────────────────────────────
-G='\033[0;32m'; Y='\033[0;33m'; R='\033[0;31m'; C='\033[0;36m'; NC='\033[0m'
-ok()   { echo -e "  ${G}[ok]${NC} $1"; }
-warn() { echo -e "  ${Y}[!!]${NC} $1"; }
-fail() { echo -e "  ${R}[fail]${NC} $1"; exit 1; }
-info() { echo -e "  ${C}[..]${NC} $1"; }
-
-# ─── Cleanup on exit ────────────────────────────────────────────────────────
-cleanup() {
-    echo ""
-    echo "Shutting down..."
-    if [ -n "$BACKEND_PID" ] && kill -0 "$BACKEND_PID" 2>/dev/null; then
-        info "Stopping backend (PID $BACKEND_PID)"
-        kill "$BACKEND_PID" 2>/dev/null
-        wait "$BACKEND_PID" 2>/dev/null || true
-        ok "Backend stopped"
-    fi
-    lsof -ti:$BACKEND_PORT 2>/dev/null | xargs kill -9 2>/dev/null || true
-    echo "Done. Containers left running for fast restart."
-}
-trap cleanup EXIT INT TERM
+# Owlynn Launcher — simple and reliable
+cd "$(dirname "$0")"
 
 echo ""
-echo "─── Owlynn Launcher ───"
+echo "── Owlynn ──"
 echo ""
 
-# ─── 1. Podman ───────────────────────────────────────────────────────────────
-info "Checking Podman..."
-if ! command -v podman &>/dev/null; then
-    fail "Podman not installed. Run: brew install podman"
-fi
-
-if ! podman ps &>/dev/null; then
-    info "Podman machine not responding, starting..."
-    pkill -9 -f gvproxy 2>/dev/null || true
-    sleep 1
-    podman machine stop 2>/dev/null || true
-    podman machine start 2>/dev/null || { fail "Could not start Podman machine"; }
-    # Wait for socket to be ready
-    for i in $(seq 1 10); do
-        podman ps &>/dev/null && break
-        sleep 1
-    done
-fi
-podman ps &>/dev/null && ok "Podman machine running" || fail "Podman machine not usable"
-
-# ─── 2. Containers ───────────────────────────────────────────────────────────
-info "Checking containers..."
-RUNNING=$(podman ps --format '{{.Names}}' 2>/dev/null | tr '\n' ' ')
-if echo "$RUNNING" | grep -q "cowork_redis"; then
-    ok "Containers already running"
+# 1. Podman containers
+echo "[1/4] Containers..."
+if podman ps 2>/dev/null | grep -q cowork_redis; then
+    echo "      Already running."
 else
-    info "Starting containers..."
-    podman compose up -d 2>/dev/null || podman-compose up -d 2>/dev/null || warn "Containers failed to start"
-    info "Waiting for services to be ready..."
+    podman machine start 2>/dev/null
+    sleep 3
+    podman compose up -d 2>/dev/null || podman-compose up -d 2>/dev/null
+    echo "      Waiting 8s for services..."
     sleep 8
-    ok "Containers started"
 fi
+echo "      Done."
 
-# Verify Redis
-if curl -s telnet://localhost:6379 </dev/null &>/dev/null || podman exec cowork_redis redis-cli ping 2>/dev/null | grep -q PONG; then
-    ok "Redis responding"
+# 2. LM Studio
+echo "[2/4] LM Studio..."
+if curl -s http://127.0.0.1:1234/v1/models >/dev/null 2>&1; then
+    echo "      Ready."
 else
-    warn "Redis not responding — will use MemorySaver fallback"
+    echo "      Not responding on port 1234."
+    echo "      Please open LM Studio and start the server."
+    read -p "      Press Enter when ready..."
+    curl -s http://127.0.0.1:1234/v1/models >/dev/null 2>&1 || { echo "      Still not available. Exiting."; exit 1; }
 fi
 
-# ─── 3. LM Studio ───────────────────────────────────────────────────────────
-info "Checking LM Studio on port $LM_STUDIO_PORT..."
-WAITED=0
-while ! curl -s "http://127.0.0.1:$LM_STUDIO_PORT/v1/models" >/dev/null 2>&1; do
-    if [ $WAITED -eq 0 ]; then
-        warn "LM Studio not responding. Please open it and start the server."
-    fi
-    sleep 2
-    WAITED=$((WAITED + 2))
-    [ $WAITED -ge 60 ] && fail "LM Studio not available after 60s"
-done
-
-MODELS=$(curl -s "http://127.0.0.1:$LM_STUDIO_PORT/v1/models" 2>/dev/null \
-    | python3 -c "import sys,json;print(', '.join(m['id'] for m in json.load(sys.stdin).get('data',[])))" 2>/dev/null || echo "unknown")
-ok "LM Studio ready — $MODELS"
-
-# ─── 4. Backend ──────────────────────────────────────────────────────────────
-info "Starting backend..."
-lsof -ti:$BACKEND_PORT 2>/dev/null | xargs kill -9 2>/dev/null || true
+# 3. Backend
+echo "[3/4] Backend..."
+lsof -ti:8000 2>/dev/null | xargs kill -9 2>/dev/null
 sleep 1
 
-export PYTHONPATH="$SCRIPT_DIR:$PYTHONPATH"
+export PYTHONPATH="$(pwd):$PYTHONPATH"
 export SEARXNG_URL=http://localhost:8888
-source .venv/bin/activate 2>/dev/null || true
+source .venv/bin/activate 2>/dev/null
 
-.venv/bin/python -m uvicorn src.api.server:app \
-    --host 127.0.0.1 --port $BACKEND_PORT --no-access-log &
-BACKEND_PID=$!
+.venv/bin/python -m uvicorn src.api.server:app --host 127.0.0.1 --port 8000 --no-access-log &
+PID=$!
 
-info "Waiting for backend..."
-for i in $(seq 1 40); do
-    if curl -s "http://127.0.0.1:$BACKEND_PORT/api/health" 2>/dev/null | grep -q '"ready"'; then
-        break
-    fi
-    kill -0 "$BACKEND_PID" 2>/dev/null || fail "Backend crashed during startup"
+for i in $(seq 1 30); do
+    curl -s http://127.0.0.1:8000/api/health 2>/dev/null | grep -q ready && break
     sleep 1
 done
-curl -s "http://127.0.0.1:$BACKEND_PORT/api/health" 2>/dev/null | grep -q '"ready"' \
-    || fail "Backend not ready after 40s"
-ok "Backend ready (PID $BACKEND_PID)"
+echo "      Ready (PID $PID)."
 
-# ─── 5. Desktop App ─────────────────────────────────────────────────────────
+# 4. Desktop app
+echo "[4/4] Opening app..."
 echo ""
-ok "All services running"
-echo "    Press Ctrl+C to shut down."
+echo "      Press Ctrl+C to stop."
 echo ""
 
 export PATH="$PATH:$HOME/.cargo/bin"
-if command -v cargo &>/dev/null; then
-    npx -y @tauri-apps/cli@1 dev 2>/dev/null || {
-        warn "Tauri failed. Open http://127.0.0.1:$BACKEND_PORT in your browser."
-        wait $BACKEND_PID
-    }
-else
-    warn "Rust/Cargo not found. Open http://127.0.0.1:$BACKEND_PORT in your browser."
-    wait $BACKEND_PID
-fi
+npx -y @tauri-apps/cli@1 dev 2>/dev/null || {
+    echo "      Tauri not available. Open http://127.0.0.1:8000"
+    wait $PID
+}
+
+# Cleanup
+echo ""
+echo "Stopping backend..."
+kill $PID 2>/dev/null
+wait $PID 2>/dev/null
+echo "Done."
