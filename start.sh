@@ -1,94 +1,174 @@
 #!/bin/bash
-# One-Stop Launch Script for Owlynn Desktop App
+# ─── Owlynn Launcher ───────────────────────────────────────────────────────
+# Starts all services, waits for readiness, launches the desktop app.
+# Ctrl+C gracefully shuts everything down.
 
-echo "🚀 Starting Owlynn Desktop App Prep..."
+set -e
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR"
 
-# Ensure we're in the right directory
-cd "$(dirname "$0")"
+BACKEND_PID=""
+PODMAN_STARTED=false
+LM_STUDIO_PORT=1234
+BACKEND_PORT=8000
 
-# 1. Start Support Services (Redis + Chroma) via Podman
-echo "-> Checking support services (Redis + ChromaDB)..."
-if command -v podman > /dev/null 2>&1; then
-    # Try using 'podman compose' or fallback to 'podman-compose'
-    if podman compose up -d || podman-compose up -d; then
-        echo "✅ Support services started."
-    else
-        echo "❌ Failed to start Podman containers."
-        echo ""
-        echo "💡 It looks like you are missing a compose provider (podman-compose / docker-compose)."
-        echo "👉 Fix it by running this in your terminal:"
-        echo "   brew install podman-compose"
-        echo ""
-        echo "Alternatively, you can install via pip: pip install podman-compose"
-        exit 1
-    fi
+# ─── Colors ─────────────────────────────────────────────────────────────────
+R='\033[0;31m'; G='\033[0;32m'; Y='\033[0;33m'; C='\033[0;36m'; NC='\033[0m'
+ok()   { echo -e "  ${G}[ok]${NC} $1"; }
+warn() { echo -e "  ${Y}[!!]${NC} $1"; }
+fail() { echo -e "  ${R}[fail]${NC} $1"; }
+info() { echo -e "  ${C}[..]${NC} $1"; }
 
-else
-    echo "❌ Error: Podman is not installed."
-    exit 1
-fi
-
-
-# 2. Check LM Studio Connection
-echo "-> Verifying LM Studio local server..."
-if ! curl -s http://127.0.0.1:1234/v1/models > /dev/null; then
-    echo "⚠️  LM Studio is NOT responding on http://127.0.0.1:1234"
-    echo "👉 Please:"
-    echo "   1. Open LM Studio"
-    echo "   2. Load your model (e.g., Qwen3.5)"
-    echo "   3. Enable the 'Local Inference Server' on port 1234"
+# ─── Cleanup on exit (Ctrl+C or normal exit) ────────────────────────────────
+cleanup() {
     echo ""
-    read -p "Press [Enter] after starting LM Studio to continue, or Ctrl+C to abort..."
-fi
+    echo "Shutting down..."
 
-# Double check
-if ! curl -s http://127.0.0.1:1234/v1/models > /dev/null; then
-    echo "❌ Connect failed again. Exiting."
+    # 1. Stop backend
+    if [ -n "$BACKEND_PID" ] && kill -0 "$BACKEND_PID" 2>/dev/null; then
+        info "Stopping backend (PID $BACKEND_PID)"
+        kill "$BACKEND_PID" 2>/dev/null
+        wait "$BACKEND_PID" 2>/dev/null
+        ok "Backend stopped"
+    fi
+
+    # 2. Free port 8000 (in case of orphan)
+    lsof -ti:$BACKEND_PORT 2>/dev/null | xargs kill -9 2>/dev/null || true
+
+    # 3. Stop Podman containers
+    if $PODMAN_STARTED; then
+        info "Stopping Podman containers"
+        podman compose down 2>/dev/null || podman-compose down 2>/dev/null || true
+        ok "Containers stopped"
+    fi
+
+    # 4. Eject LM Studio models (free VRAM)
+    info "Requesting LM Studio model unload"
+    for model_id in $(curl -s http://127.0.0.1:$LM_STUDIO_PORT/v1/models 2>/dev/null | python3 -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    for m in data.get('data', []):
+        print(m['id'])
+except: pass
+" 2>/dev/null); do
+        curl -s -X POST "http://127.0.0.1:$LM_STUDIO_PORT/v1/models/unload" \
+            -H "Content-Type: application/json" \
+            -d "{\"model\": \"$model_id\"}" >/dev/null 2>&1 && \
+            ok "Unloaded: $model_id" || true
+    done
+
+    echo "Done."
+    exit 0
+}
+
+trap cleanup EXIT INT TERM
+
+echo ""
+echo "─── Owlynn Launcher ───"
+echo ""
+
+# ─── 1. Podman Machine ──────────────────────────────────────────────────────
+info "Checking Podman..."
+if ! command -v podman &>/dev/null; then
+    fail "Podman is not installed. Install with: brew install podman"
     exit 1
 fi
-echo "✅ LM Studio verified."
 
-# 3. Start FastAPI Backend in background
-echo "-> Starting Backend..."
-export PYTHONPATH=$PYTHONPATH:$(pwd)
-export SEARXNG_URL=http://localhost:8888
-source .venv/bin/activate
+# Check if machine is running, start if not
+if ! podman info &>/dev/null; then
+    info "Podman machine not running, starting..."
+    pkill -9 -f gvproxy 2>/dev/null || true
+    podman machine start 2>/dev/null || {
+        warn "Podman machine start failed, trying init + start"
+        podman machine init 2>/dev/null || true
+        podman machine start
+    }
+fi
+ok "Podman machine running"
 
-# Be robust: kill any old instance listening on 8000
-# (Since lsof might require permissions, we try to start uvicorn safely)
-.venv/bin/python -m uvicorn src.api.server:app --host 127.0.0.1 --port 8000 --reload &
-BACKEND_PID=$!
+# ─── 2. Containers (Redis, ChromaDB, SearXNG) ───────────────────────────────
+info "Starting containers..."
+if podman compose up -d 2>/dev/null || podman-compose up -d 2>/dev/null; then
+    PODMAN_STARTED=true
+    ok "Containers started (Redis, ChromaDB, SearXNG)"
+else
+    warn "Container start failed — app will work without Redis/ChromaDB"
+fi
 
-echo "Backend PID: $BACKEND_PID"
-echo "Backend PID: $BACKEND_PID"
-echo "Waiting for Backend to fully initialize..."
-
-# Active wait loop for server and agent readiness
-while true; do
-    RESPONSE=$(curl -s http://127.0.0.1:8000/api/health)
-    if [[ "$RESPONSE" == *"\"agent\":\"ready\""* ]]; then
-        break
+# ─── 3. LM Studio ───────────────────────────────────────────────────────────
+info "Checking LM Studio on port $LM_STUDIO_PORT..."
+MAX_WAIT=30
+WAITED=0
+while ! curl -s "http://127.0.0.1:$LM_STUDIO_PORT/v1/models" >/dev/null 2>&1; do
+    if [ $WAITED -eq 0 ]; then
+        warn "LM Studio not responding. Please open LM Studio and start the server."
+        echo "       Waiting up to ${MAX_WAIT}s..."
     fi
-    sleep 1
-    # Fail fast if backend process died
-    if ! kill -0 $BACKEND_PID 2>/dev/null; then
-        echo "❌ Backend crashed during startup."
+    sleep 2
+    WAITED=$((WAITED + 2))
+    if [ $WAITED -ge $MAX_WAIT ]; then
+        fail "LM Studio not available after ${MAX_WAIT}s. Exiting."
         exit 1
     fi
 done
 
+# Show loaded models
+MODELS=$(curl -s "http://127.0.0.1:$LM_STUDIO_PORT/v1/models" 2>/dev/null | python3 -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    models = [m['id'] for m in data.get('data', [])]
+    print(', '.join(models) if models else 'none')
+except: print('unknown')
+" 2>/dev/null)
+ok "LM Studio ready — models: $MODELS"
 
-echo "✅ Backend fully started."
+# ─── 4. Backend ──────────────────────────────────────────────────────────────
+info "Starting backend on port $BACKEND_PORT..."
 
+# Kill any orphan on the port
+lsof -ti:$BACKEND_PORT 2>/dev/null | xargs kill -9 2>/dev/null || true
+sleep 1
 
-# 4. Start Tauri App
-echo "-> Starting Tauri Desktop App..."
-export PATH=$PATH:$HOME/.cargo/bin
+export PYTHONPATH="$SCRIPT_DIR:$PYTHONPATH"
+export SEARXNG_URL=http://localhost:8888
+source .venv/bin/activate 2>/dev/null || true
 
-# Dev will open window & rebuild if files change
-npx -y @tauri-apps/cli@1 dev
+.venv/bin/python -m uvicorn src.api.server:app \
+    --host 127.0.0.1 --port $BACKEND_PORT --no-access-log &
+BACKEND_PID=$!
 
-# 5. Cleanup on Exit
-echo "-> Stopping Backend (PID $BACKEND_PID)..."
-kill $BACKEND_PID
-echo "Done."
+# Wait for health check
+info "Waiting for backend to initialize..."
+for i in $(seq 1 30); do
+    if curl -s "http://127.0.0.1:$BACKEND_PORT/api/health" 2>/dev/null | grep -q '"ready"'; then
+        break
+    fi
+    if ! kill -0 "$BACKEND_PID" 2>/dev/null; then
+        fail "Backend crashed during startup."
+        exit 1
+    fi
+    sleep 1
+done
+
+if curl -s "http://127.0.0.1:$BACKEND_PORT/api/health" 2>/dev/null | grep -q '"ready"'; then
+    ok "Backend ready (PID $BACKEND_PID)"
+else
+    fail "Backend did not become ready in 30s."
+    exit 1
+fi
+
+# ─── 5. Desktop App ─────────────────────────────────────────────────────────
+echo ""
+ok "All services running. Opening desktop app..."
+echo "    Press Ctrl+C to shut everything down."
+echo ""
+
+export PATH="$PATH:$HOME/.cargo/bin"
+npx -y @tauri-apps/cli@1 dev 2>/dev/null || {
+    # If Tauri fails, just keep backend running and open browser
+    warn "Tauri not available. Open http://127.0.0.1:$BACKEND_PORT in your browser."
+    echo "    Press Ctrl+C to shut down."
+    wait $BACKEND_PID
+}
