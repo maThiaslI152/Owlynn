@@ -18,6 +18,7 @@ from urllib.parse import parse_qs, quote_plus, unquote, urlparse
 from langchain_core.tools import tool
 from src.config.settings import (
     BRAVE_SEARCH_API_KEY,
+    SEARXNG_URL,
     SERPER_API_KEY,
     TAVILY_API_KEY,
     WEB_SEARCH_ENABLE_BROWSER_FALLBACK,
@@ -839,6 +840,22 @@ async def web_search(
                 attempts.append(SearchAttempt("tier0", "wttr", "ok"))
                 return wt
             attempts.append(SearchAttempt("tier0", "wttr", "empty", "Not a weather query or wttr unavailable"))
+
+        # Tier 0.5: SearXNG (self-hosted metasearch — no API keys, no bot blocking)
+        if SEARXNG_URL:
+            try:
+                from src.tools.web_search_enhanced import searxng_search
+                categories = "news" if news else "general"
+                max_r = 15 if (focus_query or "").strip() else 8
+                sx_hits = await searxng_search(query, categories=categories, max_results=max_r)
+                if sx_hits:
+                    hits = [{"title": h["title"], "href": h["href"], "body": h["body"]} for h in sx_hits]
+                    hits = await _maybe_rerank_search_hits(focus_query, hits)
+                    attempts.append(SearchAttempt("tier0.5", "searxng", "ok"))
+                    return _format_search_hits_markdown(query, backend, news, hits, "via SearXNG")
+                attempts.append(SearchAttempt("tier0.5", "searxng", "empty", "No results"))
+            except Exception as e:
+                attempts.append(SearchAttempt("tier0.5", "searxng", "error", str(e)[:120]))
 
         # Tier 1A: Search APIs (auto provider selection)
         for provider in _candidate_providers(backend):

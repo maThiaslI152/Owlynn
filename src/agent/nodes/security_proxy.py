@@ -22,6 +22,7 @@ SENSITIVE_TOOLS = {
     "write_workspace_file",
     "edit_workspace_file",
     "create_directory",
+    "notebook_run",
 }
 
 SENSITIVE_PATTERN_RE = re.compile(

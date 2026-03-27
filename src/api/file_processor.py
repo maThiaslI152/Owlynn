@@ -69,10 +69,16 @@ class FileWatcherHandler(FileSystemEventHandler):
             # Document formats
             if ext == ".pdf":
                 self._process_pdf(filepath, output_path)
-            elif ext in [".csv", ".xlsx"]:
+            elif ext in [".csv", ".xlsx", ".xls", ".tsv"]:
                 self._process_table(filepath, output_path, ext)
             elif ext == ".docx":
                 self._process_word(filepath, output_path)
+            elif ext == ".pptx":
+                self._process_pptx(filepath, output_path)
+            elif ext == ".epub":
+                self._process_epub(filepath, output_path)
+            elif ext == ".rtf":
+                self._process_rtf(filepath, output_path)
             
             # Data/Config formats
             elif ext == ".json":
@@ -464,6 +470,72 @@ class FileWatcherHandler(FileSystemEventHandler):
                 f.write("\n```")
         except Exception as e:
             logger.warning(f"[Watcher] Source code parsing error in {filepath}: {e}")
+            self._process_plaintext(filepath, output_path)
+
+    def _process_pptx(self, filepath, output_path):
+        """Extract text from PowerPoint presentations."""
+        try:
+            from pptx import Presentation
+            prs = Presentation(filepath)
+            lines = [f"# PowerPoint: {os.path.basename(filepath)}\n"]
+            for i, slide in enumerate(prs.slides, 1):
+                lines.append(f"\n## Slide {i}")
+                for shape in slide.shapes:
+                    if shape.has_text_frame:
+                        for para in shape.text_frame.paragraphs:
+                            text = para.text.strip()
+                            if text:
+                                lines.append(text)
+                    if shape.has_table:
+                        table = shape.table
+                        for row in table.rows:
+                            cells = [cell.text.strip() for cell in row.cells]
+                            lines.append(" | ".join(cells))
+            with open(output_path, 'w', encoding='utf-8') as f:
+                f.write("\n".join(lines))
+        except ImportError:
+            logger.warning("[Watcher] python-pptx not installed, skipping pptx")
+            self._process_plaintext(filepath, output_path)
+
+    def _process_epub(self, filepath, output_path):
+        """Extract text from EPUB ebooks."""
+        try:
+            import zipfile
+            from bs4 import BeautifulSoup
+            lines = [f"# EPUB: {os.path.basename(filepath)}\n"]
+            with zipfile.ZipFile(filepath, 'r') as zf:
+                for name in zf.namelist():
+                    if name.endswith(('.xhtml', '.html', '.htm')):
+                        try:
+                            html = zf.read(name).decode('utf-8', errors='replace')
+                            soup = BeautifulSoup(html, 'html.parser')
+                            for tag in soup(['script', 'style', 'nav']):
+                                tag.decompose()
+                            text = soup.get_text(separator='\n', strip=True)
+                            if text.strip():
+                                lines.append(f"\n## {name}\n")
+                                lines.append(text)
+                        except Exception:
+                            continue
+            with open(output_path, 'w', encoding='utf-8') as f:
+                f.write("\n".join(lines))
+        except Exception as e:
+            logger.warning(f"[Watcher] EPUB processing error: {e}")
+            self._process_plaintext(filepath, output_path)
+
+    def _process_rtf(self, filepath, output_path):
+        """Extract text from RTF files."""
+        try:
+            with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
+                content = f.read()
+            import re
+            text = re.sub(r'\\[a-z]+\d*\s?', '', content)
+            text = re.sub(r'[{}]', '', text)
+            text = text.strip()
+            with open(output_path, 'w', encoding='utf-8') as f:
+                f.write(f"# RTF: {os.path.basename(filepath)}\n\n{text}")
+        except Exception as e:
+            logger.warning(f"[Watcher] RTF processing error: {e}")
             self._process_plaintext(filepath, output_path)
 
     def _process_plaintext(self, filepath, output_path):

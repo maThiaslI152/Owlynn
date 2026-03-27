@@ -19,6 +19,18 @@ services:
       - chroma_data:/chroma/chroma
     restart: unless-stopped
 
+  searxng:
+    image: searxng/searxng:latest
+    container_name: cowork_searxng
+    ports:
+      - "8888:8080"
+    volumes:
+      - searxng_data:/etc/searxng
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:8888
+    restart: unless-stopped
+
 volumes:
   redis_data:
   chroma_data:
+  searxng_data:

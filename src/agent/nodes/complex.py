@@ -35,10 +35,15 @@ COMPLEX_TOOL_GUIDANCE_WEB = (
 You can call tools when they help answer the user accurately. For web questions, use a frontier-style workflow:
 
 1) web_search: Find candidate pages. Pass focus_query with the user's precise information need when it differs from the search keywords — results will be reranked for relevance.
-2) fetch_webpage: Open URLs **exactly as listed** under each search hit (do not invent URLs from titles — e.g. do not assume ``deepseek.ai`` paths for third-party articles). Always pass focus_query so long pages return ranked excerpts with [1], [2], … for citation. If static fetch returns almost no text or says to use dynamic fetch, call **fetch_webpage_dynamic** on the same URL or switch to another hit from web_search.
+2) fetch_webpage: Open URLs **exactly as listed** under each search hit (do not invent URLs from titles). Always pass focus_query so long pages return ranked excerpts with [1], [2], … for citation. If static fetch returns almost no text or says to use dynamic fetch, call **fetch_webpage_dynamic** on the same URL or switch to another hit from web_search.
 3) read_workspace_file: Read a file from the user's workspace when relevant.
 4) execute_python_code: Run calculations or short scripts in the sandbox (non-interactive: never use input(); use fixed args or literals).
 5) recall_memories: Search stored long-term memories about the user.
+6) notebook_run / notebook_vars / notebook_reset: Stateful Python REPL — variables persist between calls. Use for iterative data exploration and analysis.
+7) create_docx / create_xlsx / create_pptx / create_pdf: Generate documents in the workspace.
+8) todo_add / todo_list / todo_complete / todo_remove: Manage a persistent task list.
+9) list_skills / invoke_skill: Use reusable prompt templates for common workflows.
+10) ask_user: Ask the user a clarifying question when you need more information.
 
 Answer rules after tools return:
 - Ground claims in tool output only; do not invent facts, URLs, or quotes.
@@ -53,6 +58,11 @@ You can call tools when they help answer the user accurately (web search is turn
 - read_workspace_file: Read a file from the user's workspace when relevant.
 - execute_python_code: Run calculations or short scripts in the sandbox (non-interactive: never use input(); use fixed args or literals).
 - recall_memories: Search stored long-term memories about the user.
+- notebook_run / notebook_vars / notebook_reset: Stateful Python REPL for iterative data exploration.
+- create_docx / create_xlsx / create_pptx / create_pdf: Generate documents in the workspace.
+- todo_add / todo_list / todo_complete / todo_remove: Manage a persistent task list.
+- list_skills / invoke_skill: Use reusable prompt templates for common workflows.
+- ask_user: Ask the user a clarifying question when you need more information.
 
 After tools return, summarize results clearly for the user."""
     + _TOOL_CALL_DISCIPLINE

@@ -16,6 +16,7 @@ watchdog
 pandas
 openpyxl
 python-docx
+python-pptx
 tabulate
 # Browser and web tools
 lightpanda>=0.1.0

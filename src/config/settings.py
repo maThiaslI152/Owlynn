@@ -68,6 +68,9 @@ BRAVE_SEARCH_API_KEY = (os.getenv("BRAVE_SEARCH_API_KEY", "") or "").strip()
 SERPER_API_KEY = (os.getenv("SERPER_API_KEY", "") or "").strip()
 TAVILY_API_KEY = (os.getenv("TAVILY_API_KEY", "") or "").strip()
 
+# SearXNG (self-hosted metasearch — recommended for local setups, no API keys / no bot blocking)
+SEARXNG_URL = (os.getenv("SEARXNG_URL", "") or "").strip()  # e.g. "http://localhost:8888"
+
 # ─── M4 MAC AIR OPTIMIZATION ───────────────────────────────────────────────
 # These settings are optimized for Mac M4 Air with small-large model architecture
 # Adjust based on your specific machine configuration
