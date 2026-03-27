@@ -11,11 +11,11 @@
       theme: {
         extend: {
           colors: {
-            cloud: '#0b1120',
-            anthropic: '#c79a3b',
+            cloud: '#0d1321',
+            anthropic: '#b08d3e',
             userbubble: '#151d33',
-            bordercolor: '#2a3656',
-            textdark: '#e7edf8'
+            bordercolor: '#232e48',
+            textdark: '#d4dae8'
           },
           fontFamily: {
             sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
@@ -154,13 +154,6 @@
             </div>
           </div>
           <div id="welcomeAttachmentPreviews" class="attachment-previews hidden"></div>
-        </div>
-        <div class="welcome-recents">
-          <div class="recents-header">
-            <h3>Recent chats</h3>
-            <button id="welcomeOpenChatsBtn" class="link-btn">View all</button>
-          </div>
-          <div id="welcomeRecentList" class="welcome-recent-list"></div>
         </div>
       </div>
     </div>
@@ -541,6 +534,8 @@
     <button id="addProjectBtn"></button>
     <button id="openSettingsBtn" onclick="App.openSettings()"></button>
     <button id="attachBtn"></button>
+    <div id="welcomeRecentList"></div>
+    <button id="welcomeOpenChatsBtn"></button>
     <button id="modeFastBtn"></button>
     <button id="modeReasoningBtn"></button>
     <button id="savePersonaBtn"></button>
