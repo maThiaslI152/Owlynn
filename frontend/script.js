@@ -2123,6 +2123,37 @@ function handleChunk(chunkText, metadata = {}) {
     activeAiMessage.buffer += chunkText;
     let buf = activeAiMessage.buffer;
 
+    // Handle <think>...</think> tags (Qwen3.5 reasoning format) — suppress from display
+    if (!activeAiMessage.insideThought && buf.includes('<think>')) {
+        const idx = buf.indexOf('<think>');
+        const textBefore = buf.substring(0, idx);
+        if (textBefore) {
+            if (!activeAiMessage.mainContainer) {
+                activeAiMessage.mainContainer = document.createElement('div');
+                activeAiMessage.contentDiv.appendChild(activeAiMessage.mainContainer);
+            }
+            activeAiMessage.mainText += textBefore;
+            activeAiMessage.mainContainer.innerHTML = marked.parse(activeAiMessage.mainText);
+        }
+        activeAiMessage.insideThought = true;
+        activeAiMessage._thinkTagMode = true; // track that we're in <think> not <thought>
+        activeAiMessage.buffer = buf.substring(idx + 7); // len('<think>') = 7
+        activeAiMessage.thoughtText = '';
+        return;
+    }
+    if (activeAiMessage._thinkTagMode && activeAiMessage.insideThought) {
+        if (buf.includes('</think>')) {
+            const idx = buf.indexOf('</think>');
+            activeAiMessage.insideThought = false;
+            activeAiMessage._thinkTagMode = false;
+            activeAiMessage.buffer = buf.substring(idx + 8); // len('</think>') = 8
+            return handleChunk('');
+        }
+        // Still inside <think> — swallow the content silently
+        activeAiMessage.buffer = '';
+        return;
+    }
+
     if (!activeAiMessage.insideThought && buf.includes('<thought>')) {
         const idx = buf.indexOf('<thought>');
         const textBefore = buf.substring(0, idx);

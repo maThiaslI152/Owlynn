@@ -11,6 +11,14 @@ from src.agent.tool_sets import COMPLEX_TOOLS_NO_WEB, COMPLEX_TOOLS_WITH_WEB
 from src.agent.lm_studio_compat import with_system_for_local_server
 from src.tools.core_tools import read_workspace_file
 
+
+def _strip_thinking_tags(text: str) -> str:
+    """Remove <think>...</think> blocks from Qwen3.5 reasoning output."""
+    if not text:
+        return text
+    cleaned = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+    return cleaned if cleaned else text
+
 COMPLEX_PROMPT = """You are an expert reasoning agent. Think step by step before answering.
 Current date: {current_date}
 
@@ -409,6 +417,13 @@ async def complex_llm_node(state: AgentState) -> AgentState:
                     )
                     has_tool_calls = bool(getattr(response, "tool_calls", None))
                 out_messages = [nudge, response]
+
+    # Strip <think> tags from the final response before returning
+    for i, msg in enumerate(out_messages):
+        if isinstance(msg, AIMessage) and msg.content and not getattr(msg, "tool_calls", None):
+            cleaned = _strip_thinking_tags(msg.content)
+            if cleaned != msg.content:
+                out_messages[i] = AIMessage(content=cleaned)
 
     return {
         "messages": out_messages,
