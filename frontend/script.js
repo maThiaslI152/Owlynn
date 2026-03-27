@@ -3602,7 +3602,7 @@ function applyProjectsFilter() {
 
 // ─── Project Detail View ────────────────────────────────────────────────────
 
-function openProjectDetail(projectId) {
+async function openProjectDetail(projectId) {
     const project = cachedProjects.find(p => p.id === projectId);
     if (!project) return;
 
