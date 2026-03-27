@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 SIMPLE_PROMPT = (
     "You are Owlynn, a helpful assistant. "
+    "Today is {current_date}. "
     "Give short, direct answers (1-3 sentences). "
     "No reasoning steps, no preamble, no meta commentary."
     "{style_hint}"
@@ -56,7 +57,11 @@ def _clean_response(text: str) -> str:
 async def simple_node(state: AgentState) -> AgentState:
     """Fast-path node: short answers without tools."""
     style_hint = style_instruction_for_prompt(state.get("response_style"))
-    system = SystemMessage(content=SIMPLE_PROMPT.format(style_hint=style_hint))
+    from datetime import date
+    system = SystemMessage(content=SIMPLE_PROMPT.format(
+        current_date=date.today().strftime('%B %d, %Y'),
+        style_hint=style_hint,
+    ))
     messages = list(state.get("messages") or [])
     prompt = with_system_for_local_server(system, messages)
 

@@ -144,7 +144,7 @@ function showThinkingIndicator() {
     wrapper.appendChild(content);
     messagesArea.appendChild(wrapper);
     thinkingIndicatorEl = wrapper;
-    scrollToBottom();
+    scrollToBottom(true);
 }
 
 function updateThinkingIndicatorText() {
@@ -1822,7 +1822,7 @@ function handleAskUserInterrupt(payload) {
     contentDiv.appendChild(card);
     wrapper.appendChild(contentDiv);
     messagesArea.appendChild(wrapper);
-    scrollToBottom();
+    scrollToBottom(true);
 
     // Focus the input
     setTimeout(() => {
@@ -2502,7 +2502,7 @@ function renderUserMessage(text, files = []) {
     
     wrapper.appendChild(inner);
     messagesArea.appendChild(wrapper);
-    scrollToBottom();
+    scrollToBottom(true);
 }
 
 function renderMessage(msg) {
@@ -2726,8 +2726,13 @@ function generateUUID() {
     });
 }
 
-function scrollToBottom() {
-    chatContainer.scrollTop = chatContainer.scrollHeight;
+function scrollToBottom(force = false) {
+    if (!chatContainer) return;
+    // Only auto-scroll if user is near the bottom (within 150px) or forced
+    const distFromBottom = chatContainer.scrollHeight - chatContainer.scrollTop - chatContainer.clientHeight;
+    if (force || distFromBottom < 150) {
+        chatContainer.scrollTop = chatContainer.scrollHeight;
+    }
 }
 
 // Custom Confirm Modal Helper

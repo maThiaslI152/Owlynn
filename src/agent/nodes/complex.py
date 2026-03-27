@@ -12,6 +12,8 @@ from src.agent.lm_studio_compat import with_system_for_local_server
 from src.tools.core_tools import read_workspace_file
 
 COMPLEX_PROMPT = """You are an expert reasoning agent. Think step by step before answering.
+Current date: {current_date}
+
 You have access to the user's memory context below — use it to personalize and ground your response.
 
 User memory context:
@@ -343,6 +345,7 @@ async def complex_llm_node(state: AgentState) -> AgentState:
     security_reason = state.get("security_reason")
 
     system_text = COMPLEX_PROMPT.format(
+        current_date=__import__('datetime').date.today().strftime('%B %d, %Y'),
         memory_context=memory_context,
         persona=persona,
         style_hint=style_hint,
