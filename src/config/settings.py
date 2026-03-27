@@ -76,12 +76,14 @@ SEARXNG_URL = (os.getenv("SEARXNG_URL", "") or "").strip()  # e.g. "http://local
 
 M4_MAC_OPTIMIZATION = {
     "small_model": {
-        "max_tokens": 1024,      # Routing doesn't need long responses
+        "max_tokens": 512,       # Routing doesn't need long responses
+        "context_length": 4096,  # Lfm2.5 1.2B context window
         "temperature": 0.1,      # Lower for consistent routing
         "timeout": 10,           # seconds - small model should be fast
     },
     "large_model": {
-        "max_tokens": 12000,      # Reduced from 8192 for M4 memory efficiency
+        "max_tokens": 6144,       # Dynamic budget handles this per-request
+        "context_length": 16384,  # Qwen3.5 9B context window
         "temperature": 0.5,
         "timeout": 30,           # seconds - allow time for reasoning
     },

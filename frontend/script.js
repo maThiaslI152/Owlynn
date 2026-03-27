@@ -3637,26 +3637,47 @@ async function openProjectDetail(projectId) {
         }
     }
 
-    // Render files from workspace directory (not just project metadata)
+    // Render files from workspace directory as cards
     const filesEl = document.getElementById('projectDetailFiles');
     if (filesEl) {
         try {
             const res = await fetch(`${API_BASE}/api/files?sub_path=&project_id=${projectId}`);
             const files = await res.json();
             if (!files.length) {
-                filesEl.innerHTML = '<p class="empty-hint">No files uploaded.</p>';
+                filesEl.innerHTML = '<p class="empty-hint">No files yet.</p>';
             } else {
                 filesEl.innerHTML = '';
                 files.forEach(f => {
-                    const item = document.createElement('div');
-                    item.style.cssText = 'padding:0.5rem 0;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between';
+                    if (f.is_dir) return;
                     const name = f.name || f;
+                    const ext = name.split('.').pop().toLowerCase();
                     const size = f.size ? `${(f.size / 1024).toFixed(1)} KB` : '';
-                    item.innerHTML = `
-                        <span style="color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">${DOMPurify.sanitize(name)}</span>
-                        <span style="color:var(--text-muted);font-size:0.7rem;margin-left:0.5rem;flex-shrink:0">${size}</span>
+                    const fmtClass = ['pdf'].includes(ext) ? 'pdf' : ['docx','doc'].includes(ext) ? 'docx' : ['xlsx','xls','csv'].includes(ext) ? 'xlsx' : ['pptx','ppt'].includes(ext) ? 'pptx' : ['png','jpg','jpeg','gif','svg','webp'].includes(ext) ? 'img' : '';
+
+                    const card = document.createElement('div');
+                    card.className = 'project-file-card';
+                    card.innerHTML = `
+                        <div class="file-actions">
+                            <button class="file-action-btn" data-action="rename" title="Rename">R</button>
+                            <button class="file-action-btn danger" data-action="delete" title="Delete">×</button>
+                        </div>
+                        <span class="file-format ${fmtClass}">${ext}</span>
+                        <span class="file-name" title="${DOMPurify.sanitize(name)}">${DOMPurify.sanitize(name)}</span>
+                        <span class="file-size">${size}</span>
                     `;
-                    filesEl.appendChild(item);
+                    card.onclick = (e) => {
+                        if (e.target.closest('.file-action-btn')) return;
+                        openProjectFileViewer(projectId, name, ext);
+                    };
+                    card.querySelector('[data-action="rename"]').onclick = (e) => {
+                        e.stopPropagation();
+                        renameProjectFile(projectId, name);
+                    };
+                    card.querySelector('[data-action="delete"]').onclick = (e) => {
+                        e.stopPropagation();
+                        deleteProjectFile(projectId, name);
+                    };
+                    filesEl.appendChild(card);
                 });
             }
         } catch (_) {
@@ -3680,18 +3701,28 @@ async function openProjectDetail(projectId) {
         document.getElementById('workspaceFileInput')?.click();
     };
 
-    // Drag-drop on files section
+    // Drag-drop on the entire project detail view
     const dropZone = document.getElementById('projectDropZone');
-    const filesCard = document.getElementById('projectFilesCard');
-    if (dropZone && filesCard) {
-        filesCard.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('drag-over'); });
-        filesCard.addEventListener('dragleave', () => { dropZone.classList.remove('drag-over'); });
-        filesCard.addEventListener('drop', async (e) => {
+    const detailView = document.getElementById('view-project-detail');
+    if (dropZone && detailView) {
+        let dragCounter = 0;
+        detailView.addEventListener('dragenter', (e) => {
             e.preventDefault();
-            dropZone.classList.remove('drag-over');
+            dragCounter++;
+            dropZone.classList.remove('hidden');
+        });
+        detailView.addEventListener('dragover', (e) => { e.preventDefault(); });
+        detailView.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            dragCounter--;
+            if (dragCounter <= 0) { dragCounter = 0; dropZone.classList.add('hidden'); }
+        });
+        detailView.addEventListener('drop', async (e) => {
+            e.preventDefault();
+            dragCounter = 0;
+            dropZone.classList.add('hidden');
             const files = e.dataTransfer?.files;
             if (!files?.length) return;
-            switchProject(projectId, false);
             for (const file of files) {
                 const formData = new FormData();
                 formData.append('file', file);
@@ -3699,15 +3730,18 @@ async function openProjectDetail(projectId) {
                     await fetch(`${API_BASE}/api/upload?sub_path=&project_id=${projectId}`, { method: 'POST', body: formData });
                 } catch (_) {}
             }
-            // Refresh
             await loadProjects();
             openProjectDetail(projectId);
         });
         dropZone.onclick = () => {
-            switchProject(projectId, false);
             document.getElementById('workspaceFileInput')?.click();
         };
     }
+
+    // Close split viewer
+    document.getElementById('projectViewerClose').onclick = () => {
+        document.getElementById('projectFileViewer')?.classList.add('hidden');
+    };
     document.getElementById('projectSendBtn').onclick = () => {
         const input = document.getElementById('projectInput');
         const text = input?.value?.trim();
@@ -3724,6 +3758,52 @@ async function openProjectDetail(projectId) {
             document.getElementById('projectSendBtn')?.click();
         }
     });
+}
+
+function openProjectFileViewer(projectId, filename, ext) {
+    const viewer = document.getElementById('projectFileViewer');
+    const titleEl = document.getElementById('projectViewerTitle');
+    const contentEl = document.getElementById('projectViewerContent');
+    if (!viewer || !contentEl) return;
+
+    titleEl.textContent = filename;
+    viewer.classList.remove('hidden');
+    contentEl.innerHTML = '<p class="empty-hint">Loading...</p>';
+
+    const url = `${API_BASE}/api/files/${encodeURIComponent(filename)}?sub_path=&project_id=${projectId}`;
+
+    if (ext === 'pdf') {
+        contentEl.innerHTML = `<iframe src="${url}"></iframe>`;
+    } else if (['png','jpg','jpeg','gif','svg','webp'].includes(ext)) {
+        contentEl.innerHTML = `<img src="${url}" alt="${filename}">`;
+    } else {
+        fetch(url).then(r => r.text()).then(text => {
+            contentEl.innerHTML = `<pre>${escapeHtml(text)}</pre>`;
+        }).catch(() => {
+            contentEl.innerHTML = '<p class="empty-hint">Could not load file.</p>';
+        });
+    }
+}
+
+async function renameProjectFile(projectId, oldName) {
+    const newName = await showCustomInput('Rename File', 'New name', oldName);
+    if (!newName || newName === oldName) return;
+    try {
+        await fetch(`${API_BASE}/api/files/${encodeURIComponent(oldName)}/rename`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ new_name: newName, sub_path: '', project_id: projectId })
+        });
+        openProjectDetail(projectId);
+    } catch (_) {}
+}
+
+async function deleteProjectFile(projectId, filename) {
+    const ok = await showCustomConfirm('Delete File', `Delete "${filename}"?`, true);
+    if (!ok) return;
+    try {
+        await fetch(`${API_BASE}/api/files/${encodeURIComponent(filename)}?sub_path=&project_id=${projectId}`, { method: 'DELETE' });
+        openProjectDetail(projectId);
+    } catch (_) {}
 }
 
 function showProjectContextMenu(event, project, isPinned) {

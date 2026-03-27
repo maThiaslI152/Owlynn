@@ -731,11 +731,58 @@ input[type="range"] { accent-color: var(--accent); height: 6px; }
 }
 
 .project-dropzone {
-  border: 2px dashed var(--border); border-radius: var(--radius); padding: 1.5rem;
-  text-align: center; color: var(--text-muted); font-size: 0.82rem;
-  transition: border-color var(--transition), background var(--transition);
-  margin-top: 0.75rem; cursor: pointer;
+  border: 2px dashed var(--accent); border-radius: var(--radius); padding: 2rem;
+  text-align: center; color: var(--accent); font-size: 0.85rem; font-weight: 500;
+  background: var(--accent-soft);
+  margin-top: 0.75rem;
 }
-.project-dropzone:hover, .project-dropzone.drag-over {
-  border-color: var(--accent); background: var(--accent-soft);
+
+/* File cards grid */
+.project-files-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 0.75rem; }
+.project-file-card {
+  border: 1px solid var(--border); border-radius: var(--radius); padding: 0.75rem;
+  cursor: pointer; transition: border-color var(--transition); position: relative;
+  display: flex; flex-direction: column; gap: 0.4rem;
+}
+.project-file-card:hover { border-color: var(--text-muted); }
+.project-file-card .file-format {
+  display: inline-block; padding: 0.15rem 0.4rem; border-radius: 3px;
+  font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+  background: var(--surface-el); color: var(--text-muted); align-self: flex-start;
+}
+.project-file-card .file-format.pdf { background: #3b1c1c; color: #f87171; }
+.project-file-card .file-format.docx { background: #1c2d3b; color: #60a5fa; }
+.project-file-card .file-format.xlsx { background: #1c3b2a; color: #34d399; }
+.project-file-card .file-format.pptx { background: #3b2a1c; color: #fb923c; }
+.project-file-card .file-format.img { background: #2a1c3b; color: #a78bfa; }
+.project-file-card .file-name { font-size: 0.8rem; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-file-card .file-size { font-size: 0.7rem; color: var(--text-muted); }
+.project-file-card .file-actions {
+  position: absolute; top: 0.4rem; right: 0.4rem; display: flex; gap: 2px; opacity: 0;
+  transition: opacity var(--transition);
+}
+.project-file-card:hover .file-actions { opacity: 1; }
+.project-file-card .file-action-btn {
+  width: 22px; height: 22px; border-radius: 3px; display: flex; align-items: center; justify-content: center;
+  font-size: 0.7rem; color: var(--text-muted); background: var(--surface);
+}
+.project-file-card .file-action-btn:hover { background: var(--surface-el); color: var(--text); }
+.project-file-card .file-action-btn.danger:hover { color: var(--danger); }
+
+/* Split file viewer */
+.project-file-viewer {
+  width: 400px; flex-shrink: 0; border-left: 1px solid var(--border);
+  display: flex; flex-direction: column; height: 100%; background: var(--bg-soft);
+}
+.project-viewer-header {
+  display: flex; align-items: center; gap: 0.5rem; padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border);
+}
+.project-viewer-content { flex: 1; overflow: auto; padding: 1rem; }
+.project-viewer-content iframe { width: 100%; height: 100%; border: none; }
+.project-viewer-content img { max-width: 100%; border-radius: var(--radius); }
+.project-viewer-content pre { font-size: 0.8rem; white-space: pre-wrap; word-break: break-word; color: var(--text); }
+
+@media (max-width: 900px) {
+  .project-file-viewer { position: fixed; right: 0; top: 0; height: 100vh; z-index: 50; width: 100%; max-width: 400px; box-shadow: -4px 0 20px rgba(0,0,0,0.3); }
 }

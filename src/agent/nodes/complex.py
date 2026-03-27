@@ -379,7 +379,8 @@ async def complex_llm_node(state: AgentState) -> AgentState:
 
     if mode == "tools_off":
         large_llm = await get_large_llm()
-        response = await large_llm.ainvoke(prompt_messages)
+        budget = state.get("token_budget") or 4096
+        response = await large_llm.bind(max_tokens=budget).ainvoke(prompt_messages)
         return {
             "messages": [AIMessage(content=response.content)],
             "model_used": "large",
@@ -387,7 +388,8 @@ async def complex_llm_node(state: AgentState) -> AgentState:
         }
 
     tools = COMPLEX_TOOLS_WITH_WEB if web_on else COMPLEX_TOOLS_NO_WEB
-    large_llm = (await get_large_llm()).bind_tools(tools)
+    budget = state.get("token_budget") or 4096
+    large_llm = (await get_large_llm()).bind_tools(tools).bind(max_tokens=budget)
     response = await large_llm.ainvoke(prompt_messages)
     has_tool_calls = bool(getattr(response, "tool_calls", None))
     if not has_tool_calls and not str(getattr(response, "content", "") or "").strip():

@@ -52,6 +52,9 @@ class AgentState(TypedDict):
     memory_context: str | None     # Formatted context string
     persona: str | None            # Persona summary string
 
+    # Dynamic token budget — set by the router based on request complexity
+    token_budget: int | None
+
     # Secure cyclic tool flow state
     pending_tool_calls: bool | None
     pending_tool_names: Annotated[list[str], operator.add]

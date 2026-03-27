@@ -252,7 +252,7 @@
     </div>
 
     <!-- View: Project Detail (inside a project) -->
-    <div id="view-project-detail" class="view">
+    <div id="view-project-detail" class="view" style="flex-direction:row">
       <div class="view-page" style="max-width:800px">
         <button id="projectBackBtn" class="link-btn" style="margin-bottom:0.75rem;font-size:0.82rem">← All projects</button>
         <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:0.25rem">
@@ -298,14 +298,20 @@
             <span style="font-size:0.9rem;font-weight:600">Files</span>
             <button id="projectUploadFile" class="icon-btn" style="width:28px;height:28px;font-size:0.9rem" title="Upload">+</button>
           </div>
-          <div id="projectDetailFiles" style="font-size:0.82rem;min-height:60px"></div>
-          <div id="projectDropZone" class="project-dropzone">
+          <div id="projectDetailFiles" class="project-files-grid"></div>
+          <div id="projectDropZone" class="project-dropzone hidden">
             Drop files here to upload
           </div>
         </div>
       </div>
-      <!-- Right side reserved for future split file viewer -->
-      <div id="projectDetailSidebar" class="hidden"></div>
+      <!-- Right side: split file viewer -->
+      <div id="projectFileViewer" class="project-file-viewer hidden">
+        <div class="project-viewer-header">
+          <span id="projectViewerTitle" style="font-weight:600;font-size:0.9rem;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
+          <button id="projectViewerClose" class="icon-btn" style="width:28px;height:28px">✕</button>
+        </div>
+        <div id="projectViewerContent" class="project-viewer-content"></div>
+      </div>
     </div>
 
     <!-- View: Customize -->

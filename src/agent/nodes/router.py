@@ -14,6 +14,102 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
+# ── Dynamic Token Budget ────────────────────────────────────────────────────
+# Instead of a fixed max_tokens, the router estimates how many tokens the
+# response will need based on the user's message.  The LLM nodes read
+# state["token_budget"] and .bind(max_tokens=budget) at call time.
+#
+# Context window limits (from LM Studio):
+#   Large model (Qwen3.5 9B):  16384 context
+#   Small model (Lfm2.5 1.2B):  4096 context
+# max_tokens is OUTPUT only; input tokens eat into the same window.
+# We reserve headroom for input (system prompt + memory context + messages).
+
+_LARGE_MODEL_CONTEXT = 16384
+_SMALL_MODEL_CONTEXT = 4096
+
+# Rough estimate: system prompt + memory context + conversation history
+# typically consumes 2000-4000 tokens for the large model, ~1000 for small.
+_LARGE_INPUT_RESERVE = 4000
+_SMALL_INPUT_RESERVE = 1500
+
+_LARGE_MAX_OUTPUT = _LARGE_MODEL_CONTEXT - _LARGE_INPUT_RESERVE  # ~12384
+_SMALL_MAX_OUTPUT = _SMALL_MODEL_CONTEXT - _SMALL_INPUT_RESERVE   # ~2596
+
+# Tier definitions: (max_input_chars, token_budget)
+_BUDGET_TIERS = [
+    # Greetings / tiny questions
+    (40,   256),
+    # Short questions ("what is X?", "how do I Y?")
+    (150,  512),
+    # Medium questions, single-topic explanations
+    (400,  1536),
+    # Longer prompts, multi-part questions
+    (800,  3072),
+    # Complex / code-heavy / multi-step requests
+    (1600, 4096),
+]
+_BUDGET_MAX = 6144  # Anything longer than the last tier
+
+# Keywords that signal the user wants a long/detailed answer
+_LONG_ANSWER_HINTS = {
+    "explain", "write", "create", "implement", "build", "generate",
+    "refactor", "analyze", "compare", "review", "summarize", "translate",
+    "step by step", "in detail", "full code", "complete",
+}
+
+# Keywords that signal a short answer is fine
+_SHORT_ANSWER_HINTS = {
+    "yes or no", "true or false", "which one", "what is",
+    "how much", "how many", "when", "where",
+}
+
+
+def estimate_token_budget(user_text: str, route: str) -> int:
+    """
+    Estimate a reasonable max_tokens budget for the response.
+    
+    Factors:
+    - Length of the user message (longer input → likely needs longer output)
+    - Detected intent keywords (explain/write → more tokens)
+    - Route decision (simple always gets a small budget)
+    - Model context window limits (hard ceiling)
+    """
+    if route == "simple":
+        # Small model: 4096 context total, reserve for input
+        budget = 256
+        text_len = len(user_text)
+        if text_len > 100:
+            budget = 512
+        return min(budget, _SMALL_MAX_OUTPUT)
+
+    text_len = len(user_text)
+    text_lower = user_text.lower()
+
+    # Start with tier-based estimate from input length
+    budget = _BUDGET_MAX
+    for max_chars, tier_budget in _BUDGET_TIERS:
+        if text_len <= max_chars:
+            budget = tier_budget
+            break
+
+    # Boost if the user is asking for something that needs a long answer
+    if any(hint in text_lower for hint in _LONG_ANSWER_HINTS):
+        budget = max(budget, 3072)
+
+    # Cap if the user is asking a short-answer question
+    if any(hint in text_lower for hint in _SHORT_ANSWER_HINTS):
+        budget = min(budget, 1536)
+
+    # Longer input text eats into the context window — reduce output budget
+    # Rough heuristic: ~4 chars per token for English
+    estimated_input_tokens = _LARGE_INPUT_RESERVE + (text_len // 4)
+    available = _LARGE_MODEL_CONTEXT - estimated_input_tokens
+    budget = min(budget, max(available, 512))  # Never go below 512 for complex
+
+    return budget
+
 # Router: minimal tokens; reasoning-style small models get a hard "no deliberation" instruction.
 ROUTER_PROMPT = """Classify in one shot. No reasoning, no preamble, no markdown.
 
@@ -103,7 +199,7 @@ async def router_node(state: AgentState) -> AgentState:
         )
         if has_tool_history:
             logger.info("[router] Complex path — conversation has tool history")
-            return {"route": "complex"}
+            return {"route": "complex", "token_budget": estimate_token_budget(user_text, "complex")}
 
     web_on = state.get("web_search_enabled")
     if web_on is None:
@@ -111,7 +207,7 @@ async def router_node(state: AgentState) -> AgentState:
 
     if web_on and any(h in user_lower for h in _WEBISH_HINTS):
         logger.info("[router] Complex path — web/live-data intent (web_search enabled)")
-        return {"route": "complex"}
+        return {"route": "complex", "token_budget": estimate_token_budget(user_text, "complex")}
 
     # Attachments saved to workspace need the large model + tools (read_workspace_file, etc.).
     if (
@@ -120,7 +216,7 @@ async def router_node(state: AgentState) -> AgentState:
         or "workspace file" in user_lower
     ):
         logger.info("[router] Complex path — workspace / attachment context")
-        return {"route": "complex"}
+        return {"route": "complex", "token_budget": estimate_token_budget(user_text, "complex")}
 
     # Quick keyword check to bypass LLM for obvious cases (saves ~1s).
     # NOTE: Do NOT include "weather" here — that must use complex + web_search when enabled.
@@ -138,7 +234,7 @@ async def router_node(state: AgentState) -> AgentState:
     for kw in simple_keywords:
         if kw in user_lower:
             logger.info("[router] Simple path - keyword match")
-            return {"route": "simple"}
+            return {"route": "simple", "token_budget": estimate_token_budget(user_text, "simple")}
 
     # Get small LLM (pooled instance - no reinit overhead)
     small_llm = await get_small_llm()
@@ -159,7 +255,7 @@ async def router_node(state: AgentState) -> AgentState:
         decision = "complex"  # Safe fallback
 
     logger.info(f"[router] → {decision}")
-    return {"route": decision}
+    return {"route": decision, "token_budget": estimate_token_budget(user_text, decision)}
 
 
 CHAT_TITLE_PROMPT = """You are a helpful assistant that proposes a short chat title.
