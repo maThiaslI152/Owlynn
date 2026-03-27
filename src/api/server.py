@@ -111,6 +111,9 @@ async def serve_script():
 async def serve_style():
     return FileResponse(os.path.join(FRONTEND_DIR, "style.css"))
 
+# Serve vendor directory for offline dependencies (tailwind, dompurify, marked, fonts)
+app.mount("/vendor", StaticFiles(directory=os.path.join(FRONTEND_DIR, "vendor")), name="vendor")
+
 # ─── REST API endpoints ──────────────────────────────────────────────────────
 
 @app.get("/api/profile")

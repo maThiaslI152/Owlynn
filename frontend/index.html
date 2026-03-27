@@ -4,10 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Owlynn — AI Cowork Agent</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <!-- Tailwind for utility classes used by script.js -->
-  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Tailwind (local) -->
+  <script src="vendor/tailwind.js"></script>
   <script>
     tailwind.config = {
       theme: {
@@ -578,10 +576,10 @@
     <input id="profileLlmModel" type="hidden">
   </div>
 
-  <!-- DOMPurify for XSS protection -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.6/purify.min.js"></script>
-  <!-- Marked for markdown rendering -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
+  <!-- DOMPurify for XSS protection (local) -->
+  <script src="vendor/purify.min.js"></script>
+  <!-- Marked for markdown rendering (local) -->
+  <script src="vendor/marked.min.js"></script>
   <script src="script.js"></script>
 </body>
 </html>

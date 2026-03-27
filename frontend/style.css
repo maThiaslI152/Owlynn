@@ -1,4 +1,14 @@
 /* ─── Owlynn Design System ─── */
+
+/* Local Inter font */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('vendor/fonts/inter-latin.woff2') format('woff2');
+}
+
 :root {
   --bg: #060b16;
   --bg-soft: #0b1120;
