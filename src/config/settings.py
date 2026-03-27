@@ -41,7 +41,7 @@ MCP_CONFIG_PATH = PROJECT_ROOT / "mcp_config.json"
 
 # Web RAG (fetch_webpage excerpt ranking; optional web_search snippet rerank)
 WEB_RAG_ENABLED = os.getenv("WEB_RAG_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
-WEB_RAG_EMBED_MODEL = os.getenv("WEB_RAG_EMBED_MODEL", "all-MiniLM-L6-v2")
+WEB_RAG_EMBED_MODEL = os.getenv("WEB_RAG_EMBED_MODEL", "text-embedding-nomic-embed-text-v1.5")
 WEB_RAG_TOP_K = int(os.getenv("WEB_RAG_TOP_K", "5"))
 WEB_RAG_CHUNK_CHARS = int(os.getenv("WEB_RAG_CHUNK_CHARS", "720"))
 WEB_RAG_CHUNK_OVERLAP = int(os.getenv("WEB_RAG_CHUNK_OVERLAP", "120"))

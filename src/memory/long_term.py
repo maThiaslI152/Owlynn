@@ -2,7 +2,8 @@
 Long-Term Memory Management using Mem0 and ChromaDB.
 
 This module initializes the Mem0 memory manager with a local ChromaDB instance.
-The `memory` singleton is used by memory nodes and tools for semantic search/storage.
+Embeddings are served by LM Studio (nomic-embed-text-v1.5) to avoid loading
+a separate HuggingFace model in the Python process.
 """
 
 import os
@@ -18,19 +19,24 @@ os.environ["OPENAI_API_KEY"] = "sk-dummy-key"
 from mem0 import Memory
 
 # Initialize Mem0 to use the local ChromaDB Podman instance
+# Embedder: LM Studio serving nomic-embed-text-v1.5 (768-dim)
+# NOTE: collection changed from cowork_memory_mE5 (multilingual-e5-small)
+#       to cowork_memory_nomic (nomic-embed-text-v1.5) due to different vector spaces.
 config = {
     "vector_store": {
         "provider": "chroma",
         "config": {
             "host": "localhost",
             "port": 8100,
-            "collection_name": "cowork_memory_mE5",
+            "collection_name": "cowork_memory_nomic",
         },
     },
     "embedder": {
-        "provider": "huggingface",
+        "provider": "lmstudio",
         "config": {
-            "model": "intfloat/multilingual-e5-small",
+            "model": "text-embedding-nomic-embed-text-v1.5",
+            "embedding_dims": 768,
+            "lmstudio_base_url": "http://127.0.0.1:1234/v1",
         },
     },
 }

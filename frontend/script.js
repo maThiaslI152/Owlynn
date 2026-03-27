@@ -880,45 +880,78 @@ function renderProjectChats(chats) {
     if (!projectChatsList) return;
     projectChatsList.innerHTML = '';
     
-    // Sort chats by created_at descending (newest first)
-    const sortedChats = [...chats].sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
+    const sortedChats = [...chats].sort((a, b) => {
+        // Pinned chats first
+        const aPinned = localStorage.getItem(`pin_${a.id}`) ? 1 : 0;
+        const bPinned = localStorage.getItem(`pin_${b.id}`) ? 1 : 0;
+        if (bPinned !== aPinned) return bPinned - aPinned;
+        return (b.created_at || 0) - (a.created_at || 0);
+    });
     
     sortedChats.forEach(chat => {
         const isActive = chat.id === currentSessionId;
         if (isActive) currentChatName = chat.name || '';
+        const isPinned = Boolean(localStorage.getItem(`pin_${chat.id}`));
+        
         const item = document.createElement('div');
-        item.className = `group flex items-center gap-2 p-2 rounded text-xs cursor-pointer transition-colors ${
-            isActive ? 'bg-anthropic text-white' : 'bg-white border border-bordercolor hover:bg-gray-50'
-        }`;
-        
-        const date = chat.created_at ? new Date(chat.created_at * 1000).toLocaleDateString() : 'Unknown';
-        
+        item.className = `recent-item${isActive ? ' active' : ''}`;
         item.innerHTML = `
-            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${isActive ? 3 : 2}" stroke-linecap="round" stroke-linejoin="round" class="${isActive ? 'text-white' : 'text-gray-400'}"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-            <span class="truncate flex-1 font-medium">${chat.name || 'Untitled'}</span>
-            <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                <button class="edit-chat-btn p-1 rounded-md hover:bg-white/20 text-current opacity-70 hover:opacity-100" title="Rename Chat">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
-                </button>
-                <button class="delete-chat-btn p-1 rounded-md hover:bg-white/20 text-current opacity-70 hover:opacity-100" title="Delete Chat">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                </button>
-            </div>
-            <span class="opacity-60 text-[10px] whitespace-nowrap">${date}</span>
+            ${isPinned ? '<span class="recent-pin">*</span>' : ''}
+            <span class="recent-title">${DOMPurify.sanitize(chat.name || 'Untitled')}</span>
+            <button class="recent-menu-btn" title="More">···</button>
         `;
         
-        item.querySelector('.edit-chat-btn').onclick = (e) => {
+        item.querySelector('.recent-title').onclick = () => switchChat(chat.id);
+        item.querySelector('.recent-menu-btn').onclick = (e) => {
             e.stopPropagation();
-            editChat(chat.id, chat.name);
-        };
-        item.querySelector('.delete-chat-btn').onclick = (e) => {
-            e.stopPropagation();
-            deleteChat(chat.id, chat.name);
+            showSidebarContextMenu(e, chat, isPinned);
         };
         
-        item.onclick = () => switchChat(chat.id);
         projectChatsList.appendChild(item);
     });
+}
+
+function showSidebarContextMenu(event, chat, isPinned) {
+    // Remove any existing menu
+    document.getElementById('sidebarCtxMenu')?.remove();
+    
+    const menu = document.createElement('div');
+    menu.id = 'sidebarCtxMenu';
+    menu.className = 'sidebar-context-menu';
+    menu.innerHTML = `
+        <button class="ctx-item" data-action="pin">${isPinned ? 'Unpin' : 'Pin to top'}</button>
+        <button class="ctx-item" data-action="rename">Rename</button>
+        <div class="ctx-divider"></div>
+        <button class="ctx-item danger" data-action="delete">Delete</button>
+    `;
+    
+    // Position near the button
+    const rect = event.target.getBoundingClientRect();
+    menu.style.top = `${rect.bottom + 4}px`;
+    menu.style.left = `${Math.min(rect.left, window.innerWidth - 180)}px`;
+    document.body.appendChild(menu);
+    
+    menu.addEventListener('click', async (e) => {
+        const action = e.target.dataset.action;
+        menu.remove();
+        if (action === 'pin') {
+            if (isPinned) localStorage.removeItem(`pin_${chat.id}`);
+            else localStorage.setItem(`pin_${chat.id}`, '1');
+            await refreshSidebarRecents();
+        } else if (action === 'rename') {
+            editChat(chat.id, chat.name);
+        } else if (action === 'delete') {
+            deleteChat(chat.id, chat.name);
+        }
+    });
+    
+    // Close on click outside
+    setTimeout(() => {
+        const closer = (e) => {
+            if (!menu.contains(e.target)) { menu.remove(); document.removeEventListener('click', closer); }
+        };
+        document.addEventListener('click', closer);
+    }, 10);
 }
 
 async function switchChat(sessionId) {
@@ -3498,31 +3531,150 @@ function applyChatsFilter() {
     const container = document.getElementById('chatsListContainer');
     if (!container) return;
     const q = normalizeText(document.getElementById('chatsSearchInput')?.value);
-    const sorted = [...cachedChats].sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
-    const filtered = sorted.filter(chat => normalizeText(chat.name || 'Untitled Chat').includes(q));
+    const sorted = [...cachedChats].sort((a, b) => {
+        const aPinned = localStorage.getItem(`pin_${a.id}`) ? 1 : 0;
+        const bPinned = localStorage.getItem(`pin_${b.id}`) ? 1 : 0;
+        if (bPinned !== aPinned) return bPinned - aPinned;
+        return (b.created_at || 0) - (a.created_at || 0);
+    });
+    const filtered = sorted.filter(chat => normalizeText(chat.name || 'Untitled').includes(q));
+
+    const countEl = document.getElementById('chatsCount');
+    if (countEl) countEl.textContent = `${filtered.length} chat${filtered.length !== 1 ? 's' : ''}`;
 
     container.innerHTML = '';
     if (filtered.length === 0) {
-        container.innerHTML = '<p class="text-xs text-gray-400 italic">No chats match your search</p>';
+        container.innerHTML = '<p class="empty-hint" style="text-align:center;padding:2rem">No chats found</p>';
         return;
     }
 
     filtered.forEach(chat => {
+        const isPinned = Boolean(localStorage.getItem(`pin_${chat.id}`));
         const item = document.createElement('div');
-        item.className = 'p-3 bg-white border border-bordercolor rounded-xl hover:shadow-sm transition-shadow cursor-pointer flex items-center justify-between';
-        item.onclick = () => {
-            switchChat(chat.id);
-            switchView('chat');
-        };
+        item.className = 'chat-list-item';
+        item.dataset.chatId = chat.id;
+        const relTime = chat.created_at ? _relativeTime(chat.created_at * 1000) : '';
         item.innerHTML = `
-            <div class="flex items-center gap-3">
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-gray-400"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-                <span class="text-sm font-medium text-textdark truncate">${chat.name || 'Untitled Chat'}</span>
-            </div>
-            <span class="text-[11px] text-gray-400">${new Date(chat.created_at * 1000).toLocaleDateString()}</span>
+            <input type="checkbox" class="chat-checkbox hidden" value="${chat.id}">
+            ${isPinned ? '<span style="color:var(--accent);font-size:0.7rem;flex-shrink:0">*</span>' : ''}
+            <span class="chat-title">${DOMPurify.sanitize(chat.name || 'Untitled')}</span>
+            <span class="chat-meta">${relTime}</span>
+            <button class="chat-menu-btn icon-btn" style="width:28px;height:28px" title="More">···</button>
         `;
+        item.querySelector('.chat-title').onclick = () => {
+            if (chatsSelectMode) {
+                const cb = item.querySelector('.chat-checkbox');
+                if (cb) { cb.checked = !cb.checked; cb.dispatchEvent(new Event('change', {bubbles:true})); }
+            } else {
+                switchChat(chat.id); switchView('chat');
+            }
+        };
+        item.querySelector('.chat-menu-btn').onclick = (e) => {
+            e.stopPropagation();
+            showSidebarContextMenu(e, chat, isPinned);
+        };
         container.appendChild(item);
     });
+}
+
+function _relativeTime(ts) {
+    const diff = Date.now() - ts;
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return 'Just now';
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    const days = Math.floor(hrs / 24);
+    if (days < 7) return `${days}d ago`;
+    return new Date(ts).toLocaleDateString();
+}
+
+// Chats page: select mode for batch operations
+let chatsSelectMode = false;
+
+function initChatsPageControls() {
+    document.getElementById('chatsSelectBtn')?.addEventListener('click', () => {
+        chatsSelectMode = !chatsSelectMode;
+        const btn = document.getElementById('chatsSelectBtn');
+        const batchBar = document.getElementById('chatsBatchBar');
+        if (chatsSelectMode) {
+            btn.textContent = 'Cancel';
+            batchBar?.classList.remove('hidden');
+            document.querySelectorAll('.chat-checkbox').forEach(cb => cb.classList.remove('hidden'));
+        } else {
+            btn.textContent = 'Select';
+            batchBar?.classList.add('hidden');
+            document.querySelectorAll('.chat-checkbox').forEach(cb => { cb.classList.add('hidden'); cb.checked = false; });
+            updateChatsSelectedCount();
+        }
+    });
+
+    document.getElementById('chatsBatchCancel')?.addEventListener('click', () => {
+        document.getElementById('chatsSelectBtn')?.click();
+    });
+
+    document.getElementById('chatsBatchDelete')?.addEventListener('click', async () => {
+        const checked = [...document.querySelectorAll('.chat-checkbox:checked')].map(cb => cb.value);
+        if (!checked.length) return;
+        const confirmed = await showCustomConfirm('Delete chats', `Delete ${checked.length} selected chat(s)?`, true);
+        if (!confirmed) return;
+        for (const id of checked) {
+            try {
+                await fetch(`${API_BASE}/api/projects/${getEffectiveProjectId()}/chats/${id}`, { method: 'DELETE' });
+            } catch (_) {}
+        }
+        document.getElementById('chatsSelectBtn')?.click();
+        await loadChatsList();
+        await refreshSidebarRecents();
+    });
+
+    // Update count when checkboxes change
+    document.getElementById('chatsListContainer')?.addEventListener('change', (e) => {
+        if (e.target.classList.contains('chat-checkbox')) {
+            updateChatsSelectedCount();
+            // Highlight selected row
+            const row = e.target.closest('.chat-list-item');
+            if (row) row.classList.toggle('selected', e.target.checked);
+        }
+    });
+
+    // Move to project
+    document.getElementById('chatsBatchMove')?.addEventListener('click', async () => {
+        const checked = [...document.querySelectorAll('.chat-checkbox:checked')].map(cb => cb.value);
+        if (!checked.length) return;
+        // Show project picker
+        const projects = cachedProjects.filter(p => p.id !== 'default');
+        if (!projects.length) { alert('No projects available. Create a project first.'); return; }
+        const names = projects.map(p => p.name);
+        const picked = await showCustomInput('Move to project', 'Project name', names[0] || '');
+        if (!picked) return;
+        const target = projects.find(p => normalizeText(p.name) === normalizeText(picked));
+        if (!target) { alert('Project not found: ' + picked); return; }
+        const srcProject = getEffectiveProjectId();
+        for (const chatId of checked) {
+            try {
+                // Delete from current project
+                await fetch(`${API_BASE}/api/projects/${srcProject}/chats/${chatId}`, { method: 'DELETE' });
+                // Find chat name
+                const chat = cachedChats.find(c => c.id === chatId);
+                // Add to target project
+                await fetch(`${API_BASE}/api/projects/${target.id}/chats`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: chatId, name: chat?.name || 'Untitled', created_at: chat?.created_at || Date.now()/1000 })
+                });
+            } catch (_) {}
+        }
+        document.getElementById('chatsSelectBtn')?.click();
+        await loadChatsList();
+        await refreshSidebarRecents();
+    });
+}
+
+function updateChatsSelectedCount() {
+    const count = document.querySelectorAll('.chat-checkbox:checked').length;
+    const el = document.getElementById('chatsSelectedCount');
+    if (el) el.textContent = count;
 }
 
 function spotlightApplySelectionHighlight() {
@@ -3960,6 +4112,7 @@ window.addEventListener('resize', () => {
 // Trigger initializations
 if (typeof switchView === 'function') switchView('welcome');
 if (typeof initNavigation === 'function') initNavigation();
+if (typeof initChatsPageControls === 'function') initChatsPageControls();
 renderWelcomeRecents();
 
 // ─── Mobile Sidebar ────────────────────────────────────────────────────────

@@ -1,5 +1,8 @@
 """
 Chunking + embedding rank for frontier-style web RAG (fetched pages and search snippets).
+
+Embeddings are served by LM Studio (OpenAI-compatible /v1/embeddings endpoint)
+so no local model is loaded into the Python process.
 """
 
 from __future__ import annotations
@@ -9,6 +12,7 @@ import logging
 import re
 from typing import Any
 
+import httpx
 import numpy as np
 
 from src.config.settings import (
@@ -23,12 +27,20 @@ from src.config.settings import (
 
 logger = logging.getLogger(__name__)
 
-_embedder = None
-_embed_lock = asyncio.Lock()
+# LM Studio embedding endpoint
+_LMSTUDIO_BASE_URL = "http://127.0.0.1:1234/v1"
+_LMSTUDIO_EMBED_MODEL = WEB_RAG_EMBED_MODEL
+
+_http_client: httpx.AsyncClient | None = None
+_http_lock = asyncio.Lock()
 
 
-def _model_uses_e5_prefixes(model_name: str) -> bool:
-    return "e5" in model_name.lower()
+async def _get_http_client() -> httpx.AsyncClient:
+    global _http_client
+    async with _http_lock:
+        if _http_client is None:
+            _http_client = httpx.AsyncClient(timeout=30.0)
+    return _http_client
 
 
 def chunk_text(text: str, max_chars: int, overlap: int) -> list[str]:
@@ -88,31 +100,20 @@ def _cosine_top_k(query_vec: np.ndarray, passage_vecs: np.ndarray, k: int) -> li
     return [int(i) for i in order[:k]]
 
 
-async def _get_embedder():
-    global _embedder
-    async with _embed_lock:
-        if _embedder is None:
-            from sentence_transformers import SentenceTransformer
-
-            logger.info("[web_rag] Loading embedding model: %s", WEB_RAG_EMBED_MODEL)
-
-            def _load():
-                return SentenceTransformer(WEB_RAG_EMBED_MODEL)
-
-            _embedder = await asyncio.to_thread(_load)
-    return _embedder
-
-
-async def _encode_batch(model, texts: list[str], *, is_query: bool) -> np.ndarray:
-    e5 = _model_uses_e5_prefixes(WEB_RAG_EMBED_MODEL)
-    if e5:
-        prefix = "query: " if is_query else "passage: "
-        texts = [prefix + (t or "")[:8000] for t in texts]
-
-    def _enc():
-        return model.encode(texts, convert_to_numpy=True, show_progress_bar=False)
-
-    return await asyncio.to_thread(_enc)
+async def _embed_via_lmstudio(texts: list[str]) -> np.ndarray:
+    """Call LM Studio's OpenAI-compatible /v1/embeddings endpoint."""
+    client = await _get_http_client()
+    # Truncate inputs to avoid oversized requests
+    truncated = [(t or "")[:8000] for t in texts]
+    resp = await client.post(
+        f"{_LMSTUDIO_BASE_URL}/embeddings",
+        json={"input": truncated, "model": _LMSTUDIO_EMBED_MODEL},
+    )
+    resp.raise_for_status()
+    data = resp.json()["data"]
+    # Sort by index to preserve order
+    data.sort(key=lambda d: d["index"])
+    return np.array([d["embedding"] for d in data], dtype=np.float64)
 
 
 async def rank_chunks_to_source_pack(
@@ -141,9 +142,8 @@ async def rank_chunks_to_source_pack(
         return None
 
     try:
-        model = await _get_embedder()
-        qv = await _encode_batch(model, [fq], is_query=True)
-        pv = await _encode_batch(model, chunks, is_query=False)
+        qv = await _embed_via_lmstudio([fq])
+        pv = await _embed_via_lmstudio(chunks)
         if pv.size == 0:
             return None
         idxs = _cosine_top_k(qv[0], pv, min(k, len(chunks)))
@@ -190,9 +190,8 @@ async def rerank_search_hits(
         texts.append(f"{title}\n{body}".strip()[:2000])
 
     try:
-        model = await _get_embedder()
-        qv = await _encode_batch(model, [fq], is_query=True)
-        pv = await _encode_batch(model, texts, is_query=False)
+        qv = await _embed_via_lmstudio([fq])
+        pv = await _embed_via_lmstudio(texts)
         if pv.size == 0:
             return hits[:n_keep]
         idxs = _cosine_top_k(qv[0], pv, min(n_keep, len(hits)))
