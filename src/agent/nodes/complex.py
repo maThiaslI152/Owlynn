@@ -42,16 +42,17 @@ Tool discipline: You have native function/tool calling in this API. Whenever you
 
 COMPLEX_TOOL_GUIDANCE_WEB = (
     """
-You have tools to help answer accurately. Use them when needed:
+You have tools to help answer accurately:
 
-1) web_search: Find info online. Pass focus_query for relevance ranking.
-2) fetch_webpage: Open URLs from search results. Pass focus_query for ranked excerpts.
-3) read_workspace_file: Read files from the user's workspace.
-4) execute_python_code: Run Python in sandbox (non-interactive, no input()).
-5) recall_memories: Search long-term memories about the user.
-6) notebook_run: Stateful Python REPL — variables persist between calls.
-7) todo_add / todo_list: Manage the user's task list.
-8) ask_user: Ask a clarifying question when you need more info.
+1) web_search / fetch_webpage: Search the web and fetch page content.
+2) read_workspace_file: Read files from the user's workspace.
+3) execute_python_code: Run Python in sandbox (non-interactive, no input()).
+4) recall_memories: Search long-term memories about the user.
+5) notebook_run / notebook_reset: Stateful Python REPL — variables persist between calls.
+6) create_docx / create_xlsx / create_pptx / create_pdf: Generate documents.
+7) todo_add / todo_list / todo_complete: Manage the user's task list.
+8) list_skills / invoke_skill: Use reusable prompt templates.
+9) ask_user: Ask a clarifying question when you need more info.
 
 Rules:
 - Ground claims in tool output only. Do not invent facts or URLs.
@@ -66,9 +67,11 @@ You have tools (web search is off for this chat):
 1) read_workspace_file: Read files from workspace.
 2) execute_python_code: Run Python in sandbox (non-interactive).
 3) recall_memories: Search long-term memories.
-4) notebook_run: Stateful Python REPL.
-5) todo_add / todo_list: Manage tasks.
-6) ask_user: Ask a clarifying question.
+4) notebook_run / notebook_reset: Stateful Python REPL.
+5) create_docx / create_xlsx / create_pptx / create_pdf: Generate documents.
+6) todo_add / todo_list / todo_complete: Manage tasks.
+7) list_skills / invoke_skill: Use reusable prompt templates.
+8) ask_user: Ask a clarifying question.
 
 Summarize tool results clearly for the user."""
     + _TOOL_CALL_DISCIPLINE
