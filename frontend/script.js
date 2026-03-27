@@ -1916,7 +1916,7 @@ function updateConnectionStatus(status) {
     if (status === 'connected') {
         statusDot.className = 'w-2 h-2 rounded-full bg-green-500';
         if (mobileDot) mobileDot.className = 'w-2 h-2 rounded-full bg-green-500';
-        statusText.textContent = 'Connected to MLX API';
+        statusText.textContent = 'Connected';
         sendBtn.disabled = false;
     } else if (status === 'connecting') {
         statusDot.className = 'w-2 h-2 rounded-full bg-yellow-500 hover:animate-pulse';
@@ -4041,6 +4041,11 @@ window.submitAskUserChoice = submitAskUserChoice;
 
 window.App = {
     toggleSidebar: toggleMobileSidebar,
+    openSettings() {
+        const modal = document.getElementById('settingsModal');
+        if (modal) { modal.classList.remove('hidden'); modal.classList.add('flex'); }
+        if (typeof loadSettingsData === 'function') loadSettingsData();
+    },
     closeSettings() {
         const modal = document.getElementById('settingsModal');
         if (modal) { modal.classList.add('hidden'); modal.classList.remove('flex'); }
