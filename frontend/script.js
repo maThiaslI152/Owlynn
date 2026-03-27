@@ -1,3 +1,10 @@
+// ─── Backend URL Detection ─────────────────────────────────────────────────
+// When running inside Tauri, location.host points to tauri://localhost (not the backend).
+// Detect this and fall back to the known backend address.
+const _isTauri = Boolean(window.__TAURI__ || location.protocol === 'tauri:' || !location.host || location.host === 'localhost');
+const API_BASE = _isTauri ? 'http://127.0.0.1:8000' : '';
+const WS_BASE = _isTauri ? 'ws://127.0.0.1:8000' : `ws://${location.host}`;
+
 // State management
 let currentSessionId = generateUUID();
 let socket = null;
@@ -259,14 +266,14 @@ setWorkspaceVisibility();
 async function loadSettingsData() {
     try {
         const [profileRes, personaRes, memoriesRes, systemRes, advancedRes, topicsRes, interestsRes, conversationsRes] = await Promise.all([
-            fetch('/api/profile'),
-            fetch('/api/persona'),
-            fetch('/api/memories'),
-            fetch('/api/system-settings').catch(() => null),
-            fetch('/api/advanced-settings').catch(() => null),
-            fetch('/api/topics').catch(() => null),
-            fetch('/api/interests').catch(() => null),
-            fetch('/api/conversations').catch(() => null)
+            fetch(API_BASE + '/api/profile'),
+            fetch(API_BASE + '/api/persona'),
+            fetch(API_BASE + '/api/memories'),
+            fetch(API_BASE + '/api/system-settings').catch(() => null),
+            fetch(API_BASE + '/api/advanced-settings').catch(() => null),
+            fetch(API_BASE + '/api/topics').catch(() => null),
+            fetch(API_BASE + '/api/interests').catch(() => null),
+            fetch(API_BASE + '/api/conversations').catch(() => null)
         ]);
         
         const profile = await profileRes.json();
@@ -600,7 +607,7 @@ async function deleteMemory(fact) {
     if (!confirmed) return;
     
     try {
-        const res = await fetch('/api/memories', {
+        const res = await fetch(API_BASE + '/api/memories', {
             method: 'DELETE',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ fact })
@@ -686,7 +693,7 @@ addMemoryBtn?.addEventListener('click', async () => {
     if (!fact) return;
     
     try {
-        const res = await fetch('/api/memories', {
+        const res = await fetch(API_BASE + '/api/memories', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ fact })
@@ -704,7 +711,7 @@ addMemoryBtn?.addEventListener('click', async () => {
 
 async function loadProjects() {
     try {
-        const res = await fetch('/api/projects');
+        const res = await fetch(API_BASE + '/api/projects');
         const projects = await res.json();
         cachedProjects = projects;
         renderProjects(projects);
@@ -766,7 +773,7 @@ async function switchProject(projectId, resetChat = true) {
     loadWorkspaceFiles(); // Trigger workspace partition reload
     
     try {
-        const res = await fetch(`/api/projects/${projectId}`);
+        const res = await fetch(`${API_BASE}/api/projects/${projectId}`);
         const project = await res.json();
         currentChatName = '';
         renderProjectInspector(project);
@@ -784,7 +791,7 @@ async function switchProject(projectId, resetChat = true) {
         renderProjectChats(project.chats || []);
         
         // Reload projects list to update active state
-        const allRes = await fetch('/api/projects');
+        const allRes = await fetch(API_BASE + '/api/projects');
         const allProjects = await allRes.json();
         cachedProjects = allProjects;
         renderProjects(allProjects);
@@ -827,7 +834,7 @@ async function loadChatHistory(sessionId) {
     resetTransientExecutionUI();
     
     try {
-        const res = await fetch(`/api/history/${sessionId}`);
+        const res = await fetch(`${API_BASE}/api/history/${sessionId}`);
         const history = await res.json();
         hasSentMessageInCurrentSession = history && history.length > 0;
         
@@ -932,7 +939,7 @@ async function switchChat(sessionId) {
     connectWebSocket();
     
     // Refresh project details to update active chat highlighting
-    const res = await fetch(`/api/projects/${getEffectiveProjectId()}`);
+    const res = await fetch(`${API_BASE}/api/projects/${getEffectiveProjectId()}`);
     const project = await res.json();
     chatProjectIdForThread = getEffectiveProjectId();
     chatRegisteredInBackend = Boolean((project.chats || []).find((c) => c.id === sessionId));
@@ -946,7 +953,7 @@ async function editChat(chatId, currentName) {
     if (!newName || newName === currentName) return;
     
     try {
-        await fetch(`/api/projects/${getEffectiveProjectId()}/chats/${chatId}`, {
+        await fetch(`${API_BASE}/api/projects/${getEffectiveProjectId()}/chats/${chatId}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name: newName })
@@ -963,7 +970,7 @@ async function deleteChat(chatId, chatName) {
     if (!confirmed) return;
     
     try {
-        await fetch(`/api/projects/${getEffectiveProjectId()}/chats/${chatId}`, {
+        await fetch(`${API_BASE}/api/projects/${getEffectiveProjectId()}/chats/${chatId}`, {
             method: 'DELETE'
         });
         switchProject(getEffectiveProjectId(), false);
@@ -988,7 +995,7 @@ async function maybeAutoNameCurrentChat(userText, fileNames = []) {
         const projectId = getChatProjectId();
         const payloadFiles = (fileNames || []).map((n) => ({ name: n }));
 
-        const res = await fetch('/api/chats/generate-title', {
+        const res = await fetch(API_BASE + '/api/chats/generate-title', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -1004,7 +1011,7 @@ async function maybeAutoNameCurrentChat(userText, fileNames = []) {
         const finalName = nextName ? String(nextName).replace(/\s+/g, ' ').trim().slice(0, 60) : '';
         if (!finalName) return;
 
-        await fetch(`/api/projects/${projectId}/chats/${currentSessionId}`, {
+        await fetch(`${API_BASE}/api/projects/${projectId}/chats/${currentSessionId}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name: finalName })
@@ -1013,7 +1020,7 @@ async function maybeAutoNameCurrentChat(userText, fileNames = []) {
         currentChatName = finalName;
 
         // Refresh project data so recents reflect the new chat title.
-        const projectRes = await fetch(`/api/projects/${projectId}`);
+        const projectRes = await fetch(`${API_BASE}/api/projects/${projectId}`);
         const project = await projectRes.json();
         cachedProjects = cachedProjects.map((p) => (p.id === projectId ? project : p));
 
@@ -1034,14 +1041,14 @@ async function maybeAutoNameCurrentChat(userText, fileNames = []) {
             const fallbackName = deriveChatTitle(userText);
             if (!fallbackName) return;
             const projectId = getChatProjectId();
-            await fetch(`/api/projects/${projectId}/chats/${currentSessionId}`, {
+            await fetch(`${API_BASE}/api/projects/${projectId}/chats/${currentSessionId}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ name: fallbackName })
             });
             currentChatName = fallbackName;
             // Refresh cached project data so all recents surfaces show the title.
-            const projectRes = await fetch(`/api/projects/${projectId}`);
+            const projectRes = await fetch(`${API_BASE}/api/projects/${projectId}`);
             const project = await projectRes.json();
             cachedProjects = cachedProjects.map((p) => (p.id === projectId ? project : p));
 
@@ -1068,7 +1075,7 @@ async function editProject(projectId, currentName) {
     if (!newName || newName === currentName) return;
     
     try {
-        await fetch(`/api/projects/${projectId}`, {
+        await fetch(`${API_BASE}/api/projects/${projectId}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name: newName })
@@ -1084,7 +1091,7 @@ async function deleteProject(projectId, projectName) {
     if (!confirmed) return;
     
     try {
-        const res = await fetch(`/api/projects/${projectId}`, {
+        const res = await fetch(`${API_BASE}/api/projects/${projectId}`, {
             method: 'DELETE'
         });
         const data = await res.json();
@@ -1118,7 +1125,7 @@ async function handleCreateProject() {
     const instructions = await showCustomInput('Project Details', 'Project Instructions (optional)');
     
     try {
-        const res = await fetch('/api/projects', {
+        const res = await fetch(API_BASE + '/api/projects', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name, instructions })
@@ -1198,10 +1205,10 @@ if (tabContents.length > 0) {
 async function loadMemoryTabData() {
     try {
         const [topicsRes, interestsRes, conversationsRes, memoriesRes] = await Promise.all([
-            fetch('/api/topics').catch(() => null),
-            fetch('/api/interests').catch(() => null),
-            fetch('/api/conversations').catch(() => null),
-            fetch('/api/memories')
+            fetch(API_BASE + '/api/topics').catch(() => null),
+            fetch(API_BASE + '/api/interests').catch(() => null),
+            fetch(API_BASE + '/api/conversations').catch(() => null),
+            fetch(API_BASE + '/api/memories')
         ]);
         
         const topicsData = topicsRes ? await topicsRes.json() : { topics: [] };
@@ -1250,7 +1257,7 @@ saveSystemPromptBtn?.addEventListener('click', async () => {
         tone: personaToneInput.value
     };
     try {
-        const res = await fetch('/api/system-settings', {
+        const res = await fetch(API_BASE + '/api/system-settings', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data)
@@ -1268,7 +1275,7 @@ const longTermMemoryToggle = document.getElementById('longTermMemoryToggle');
 
 shortTermMemoryToggle?.addEventListener('change', async (e) => {
     try {
-        await fetch('/api/memory-settings', {
+        await fetch(API_BASE + '/api/memory-settings', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ short_term_enabled: e.target.checked })
@@ -1280,7 +1287,7 @@ shortTermMemoryToggle?.addEventListener('change', async (e) => {
 
 longTermMemoryToggle?.addEventListener('change', async (e) => {
     try {
-        await fetch('/api/memory-settings', {
+        await fetch(API_BASE + '/api/memory-settings', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ long_term_enabled: e.target.checked })
@@ -1332,7 +1339,7 @@ saveAdvancedBtn?.addEventListener('click', async () => {
         show_tool_execution: toolVisibilityToggle.checked
     };
     try {
-        await fetch('/api/advanced-settings', {
+        await fetch(API_BASE + '/api/advanced-settings', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data)
@@ -1359,7 +1366,7 @@ saveProfileBtn?.addEventListener('click', async () => {
     // Remove undefined/null entries
     Object.keys(data).forEach(k => { if (data[k] == null) delete data[k]; });
     try {
-        await fetch('/api/profile', {
+        await fetch(API_BASE + '/api/profile', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data)
@@ -1382,7 +1389,7 @@ savePersonaBtn?.addEventListener('click', async () => {
         tone: personaToneInput.value
     };
     try {
-        const res = await fetch('/api/persona', {
+        const res = await fetch(API_BASE + '/api/persona', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data)
@@ -1579,7 +1586,7 @@ function connectWebSocket() {
     updateConnectionStatus('connecting');
     
     websocketThreadId = currentSessionId;
-    socket = new WebSocket(`ws://${location.host}/ws/chat/${currentSessionId}`);
+    socket = new WebSocket(`${WS_BASE}/ws/chat/${currentSessionId}`);
     
     socket.onopen = () => {
         updateConnectionStatus('connected');
@@ -1930,7 +1937,7 @@ async function ensureChatRegistered() {
     const nameForRegistration = isUntitledName(currentChatName) ? 'Untitled' : (currentChatName || 'Untitled');
 
     try {
-        await fetch(`/api/projects/${projectId}/chats`, {
+        await fetch(`${API_BASE}/api/projects/${projectId}/chats`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ id: currentSessionId, name: nameForRegistration })
@@ -1940,7 +1947,7 @@ async function ensureChatRegistered() {
         localStorage.setItem(`project_session_${projectId}`, currentSessionId);
 
         // Refresh cached project so recents updates across views
-        const res = await fetch(`/api/projects/${projectId}`);
+        const res = await fetch(`${API_BASE}/api/projects/${projectId}`);
         const project = await res.json();
         cachedProjects = cachedProjects.map((p) => (p.id === projectId ? project : p));
 
@@ -2841,7 +2848,7 @@ async function loadWorkspaceFiles() {
     }
     
     try {
-        const res = await fetch(`/api/files?sub_path=${encodeURIComponent(currentSubPath)}&project_id=${getEffectiveProjectId()}`);
+        const res = await fetch(`${API_BASE}/api/files?sub_path=${encodeURIComponent(currentSubPath)}&project_id=${getEffectiveProjectId()}`);
         const files = await res.json();
         renderWorkspaceFiles(files);
         renderBreadcrumbs();
@@ -2977,7 +2984,7 @@ async function deleteWorkspaceFile(name) {
     const confirmed = await showCustomConfirm('Delete File', `Are you sure you want to delete "${name}" from the workspace?`, true);
     if (!confirmed) return;
     try {
-        await fetch(`/api/files/${encodeURIComponent(name)}?sub_path=${encodeURIComponent(currentSubPath)}&project_id=${getEffectiveProjectId()}`, { method: 'DELETE' });
+        await fetch(`${API_BASE}/api/files/${encodeURIComponent(name)}?sub_path=${encodeURIComponent(currentSubPath)}&project_id=${getEffectiveProjectId()}`, { method: 'DELETE' });
         loadWorkspaceFiles();
     } catch (e) {
         console.error('Failed to delete file:', e);
@@ -2988,7 +2995,7 @@ async function renameWorkspaceFile(name) {
     const newName = await showCustomInput('Rename File', 'New Name', name);
     if (!newName || newName === name) return;
     try {
-        await fetch(`/api/files/${encodeURIComponent(name)}/rename`, {
+        await fetch(`${API_BASE}/api/files/${encodeURIComponent(name)}/rename`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ new_name: newName, sub_path: currentSubPath, project_id: getEffectiveProjectId() })
@@ -3005,7 +3012,7 @@ async function moveWorkspaceFile(filename, fullSrcPath, targetSubPath) {
         if (fullSrcPath.includes('/')) {
              current_sub = fullSrcPath.substring(0, fullSrcPath.lastIndexOf('/'));
         }
-        await fetch(`/api/files/${encodeURIComponent(filename)}/move`, {
+        await fetch(`${API_BASE}/api/files/${encodeURIComponent(filename)}/move`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
@@ -3043,7 +3050,7 @@ workspaceFileInput?.addEventListener('change', async (e) => {
         formData.append('file', file);
 
         try {
-            await fetch(`/api/upload?sub_path=${encodeURIComponent(currentSubPath)}&project_id=${getEffectiveProjectId()}`, { method: 'POST', body: formData });
+            await fetch(`${API_BASE}/api/upload?sub_path=${encodeURIComponent(currentSubPath)}&project_id=${getEffectiveProjectId()}`, { method: 'POST', body: formData });
         } catch (err) {
             console.error('Upload failed:', err);
         }
@@ -3096,7 +3103,7 @@ if (workspacePanel && workspaceDropZone) {
             const formData = new FormData();
             formData.append('file', file);
             try {
-                await fetch(`/api/upload?sub_path=${encodeURIComponent(currentSubPath)}&project_id=${getEffectiveProjectId()}`, { method: 'POST', body: formData });
+                await fetch(`${API_BASE}/api/upload?sub_path=${encodeURIComponent(currentSubPath)}&project_id=${getEffectiveProjectId()}`, { method: 'POST', body: formData });
             } catch (err) {
                 console.error('Upload failed:', err);
             }
@@ -3119,7 +3126,7 @@ async function viewWorkspaceFile(name) {
     modal.classList.remove('hidden');
     modal.classList.add('flex');
     
-    const fileUrl = `/api/files/${encodeURIComponent(name)}?sub_path=${encodeURIComponent(currentSubPath)}&project_id=${getEffectiveProjectId()}`;
+    const fileUrl = `${API_BASE}/api/files/${encodeURIComponent(name)}?sub_path=${encodeURIComponent(currentSubPath)}&project_id=${getEffectiveProjectId()}`;
     downloadBtn.onclick = () => window.open(fileUrl, '_blank');
     
     const ext = name.split('.').pop().toLowerCase();
@@ -3205,7 +3212,7 @@ document.getElementById('newFolderBtn')?.addEventListener('click', async () => {
     if (!name) return;
     
     try {
-        const res = await fetch('/api/folders', {
+        const res = await fetch(API_BASE + '/api/folders', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name: name, sub_path: currentSubPath, project_id: getEffectiveProjectId() })
@@ -3746,7 +3753,7 @@ async function loadProjectsGrid() {
     container.innerHTML = '<p class="text-xs text-gray-400">Loading projects...</p>';
     
     try {
-        const res = await fetch('/api/projects');
+        const res = await fetch(API_BASE + '/api/projects');
         cachedProjects = await res.json();
         applyProjectsFilter();
         renderProjectInspector(cachedProjects.find((p) => p.id === activeProjectId) || null);
@@ -3761,7 +3768,7 @@ async function loadArtifactsGrid() {
     container.innerHTML = '<p class="text-xs text-gray-400">Loading artifacts...</p>';
     
     try {
-        const res = await fetch('/api/artifacts');
+        const res = await fetch(API_BASE + '/api/artifacts');
         cachedArtifacts = await res.json();
         applyArtifactsFilter();
     } catch (e) {
@@ -3775,7 +3782,7 @@ async function loadSkillsList() {
     container.innerHTML = '<p class="text-xs text-gray-400">Loading skills...</p>';
     
     try {
-        const res = await fetch('/api/tools');
+        const res = await fetch(API_BASE + '/api/tools');
         cachedTools = await res.json();
         container.innerHTML = '';
         cachedTools.forEach(t => {
@@ -3835,7 +3842,7 @@ async function loadChatsList() {
     container.innerHTML = '<p class="text-xs text-gray-400">Loading chats...</p>';
     
     try {
-        const res = await fetch(`/api/projects/${getEffectiveProjectId()}`);
+        const res = await fetch(`${API_BASE}/api/projects/${getEffectiveProjectId()}`);
         const project = await res.json();
         container.innerHTML = '';
         cachedChats = (project.chats || []).sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
@@ -3852,8 +3859,8 @@ async function loadChatsList() {
 async function loadSearchViewData() {
     try {
         const [projectsRes, projectRes] = await Promise.all([
-            fetch('/api/projects'),
-            fetch(`/api/projects/${getEffectiveProjectId()}`)
+            fetch(API_BASE + '/api/projects'),
+            fetch(`${API_BASE}/api/projects/${getEffectiveProjectId()}`)
         ]);
         cachedProjects = await projectsRes.json();
         const activeProject = await projectRes.json();
