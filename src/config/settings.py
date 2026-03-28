@@ -82,10 +82,10 @@ M4_MAC_OPTIMIZATION = {
         "timeout": 10,           # seconds - small model should be fast
     },
     "large_model": {
-        "max_tokens": 6144,       # Dynamic budget handles this per-request
-        "context_length": 16384,  # Qwen3.5 9B context window
+        "max_tokens": 8192,       # Dynamic budget handles this per-request
+        "context_length": 100000, # Qwen3.5 9B context window (set in LM Studio)
         "temperature": 0.5,
-        "timeout": 30,           # seconds - allow time for reasoning
+        "timeout": 120,          # seconds - longer timeout for big context
     },
     "memory": {
         "max_facts": 150,        # Reduced from 200 for M4 memory

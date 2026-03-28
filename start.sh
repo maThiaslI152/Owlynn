@@ -8,15 +8,26 @@ echo ""
 
 # 1. Podman containers
 echo "[1/4] Containers..."
-if podman ps 2>/dev/null | grep -q cowork_chromadb; then
-    echo "      Already running."
-else
-    podman machine start 2>/dev/null
-    sleep 3
-    podman compose up -d 2>/dev/null || podman-compose up -d 2>/dev/null
-    echo "      Waiting 8s for services..."
-    sleep 8
-fi
+# Run podman check in background with hard 15s timeout to avoid hanging
+(
+    _running=false
+    podman ps 2>/dev/null | grep -q cowork_chromadb && _running=true
+    if $_running; then
+        echo "      Already running."
+    else
+        echo "      Starting containers..."
+        podman machine start 2>/dev/null
+        podman compose up -d 2>/dev/null || podman-compose up -d 2>/dev/null
+        echo "      Waiting 8s for services..."
+        sleep 8
+    fi
+) &
+_container_pid=$!
+(sleep 15 && kill $_container_pid 2>/dev/null) &
+_timer_pid=$!
+wait $_container_pid 2>/dev/null
+kill $_timer_pid 2>/dev/null
+wait $_timer_pid 2>/dev/null
 echo "      Done."
 
 # 2. LM Studio

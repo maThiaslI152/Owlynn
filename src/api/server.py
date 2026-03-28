@@ -513,12 +513,16 @@ async def api_get_file(filename: str, sub_path: str = "", project_id: str = "def
 
     # Text mode: return processed/cached text content
     if mode == "text":
-        processed_dir = os.path.join(os.path.abspath(WORKSPACE_DIR), ".processed")
-        for ext in [".txt", ".md"]:
-            cached = os.path.join(processed_dir, filename + ext)
-            if os.path.exists(cached):
-                with open(cached, "r", encoding="utf-8") as f:
-                    return PlainTextResponse(f.read())
+        # Check project-local .processed dir first, then root workspace .processed
+        project_processed_dir = os.path.join(os.path.abspath(base_dir), ".processed")
+        root_processed_dir = os.path.join(os.path.abspath(str(WORKSPACE_DIR)), ".processed")
+        
+        for pdir in [project_processed_dir, root_processed_dir]:
+            for ext in [".txt", ".md"]:
+                cached = os.path.join(pdir, filename + ext)
+                if os.path.exists(cached):
+                    with open(cached, "r", encoding="utf-8") as f:
+                        return PlainTextResponse(f.read())
         # Fallback: try reading as text directly
         try:
             with open(filepath, "r", encoding="utf-8") as f:
@@ -643,7 +647,7 @@ async def api_move_file(filename: str, body: dict):
 
 @app.post("/api/upload")
 async def api_upload_file(file: UploadFile = File(...), sub_path: str = "", project_id: str = "default"):
-    """Saves a file directly to the workspace bypassing the graph."""
+    """Saves a file directly to the workspace. Auto-indexes into project knowledge base for non-default projects."""
     try:
         import urllib.parse
         sub_path = urllib.parse.unquote(sub_path)
@@ -659,9 +663,62 @@ async def api_upload_file(file: UploadFile = File(...), sub_path: str = "", proj
         filepath = os.path.abspath(os.path.join(target_dir, file.filename))
         if not filepath.startswith(os.path.abspath(base_dir)):
              return {"status": "error", "message": "Access denied"}
+        
+        file_bytes = await file.read()
         with open(filepath, "wb") as f:
-            f.write(await file.read())
+            f.write(file_bytes)
+
+        # Auto-index into project knowledge base for non-default projects
+        if project_id != "default":
+            import asyncio
+            asyncio.create_task(_auto_index_project_file(project_id, file.filename, filepath, file_bytes))
+
         return {"status": "ok", "message": f"Uploaded {file.filename}"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+async def _auto_index_project_file(project_id: str, filename: str, filepath: str, file_bytes: bytes):
+    """
+    Background task: extract text from an uploaded file and index it into
+    the project's ChromaDB knowledge base.
+    """
+    import asyncio
+    # Wait for file processor to finish
+    await asyncio.sleep(3)
+    
+    text = ""
+    ext = os.path.splitext(filename)[1].lower()
+    
+    try:
+        # Try reading the processed cache — check both project-local and root workspace
+        project_processed_dir = os.path.join(os.path.dirname(filepath), ".processed")
+        root_processed_dir = os.path.join(os.path.abspath(str(WORKSPACE_DIR)), ".processed")
+        
+        for pdir in [project_processed_dir, root_processed_dir]:
+            if text:
+                break
+            for cache_ext in [".txt", ".md"]:
+                cache_path = os.path.join(pdir, filename + cache_ext)
+                if os.path.exists(cache_path):
+                    with open(cache_path, "r", encoding="utf-8") as f:
+                        text = f.read()
+                    break
+        
+        # Fallback: try reading as plain text
+        if not text and ext in {".txt", ".md", ".py", ".js", ".ts", ".json", ".csv", ".html", ".xml", ".yaml", ".yml"}:
+            try:
+                text = file_bytes.decode("utf-8", errors="ignore")
+            except Exception:
+                pass
+        
+        if text and len(text.strip()) > 50:
+            await project_manager.add_knowledge(project_id, filename, text.strip())
+            print(f"[Project] Auto-indexed {filename} into project {project_id} knowledge base")
+        else:
+            print(f"[Project] Skipped indexing {filename} — no extractable text")
+    except Exception as e:
+        print(f"[Project] Failed to auto-index {filename}: {e}")
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
@@ -697,6 +754,37 @@ async def api_delete_project(project_id: str):
         return {"status": "ok"}
     else:
         return {"status": "error", "message": "Failed to delete project or cannot delete default project"}
+
+
+@app.post("/api/projects/{project_id}/knowledge")
+async def api_add_project_knowledge(project_id: str, body: dict):
+    """
+    Index a file's text content into the project's ChromaDB knowledge base.
+    Body: { "filename": "report.pdf", "content": "extracted text..." }
+    """
+    filename = body.get("filename", "")
+    content = body.get("content", "")
+    if not filename or not content:
+        return {"status": "error", "message": "filename and content are required"}
+    
+    # Truncate very large content to avoid overwhelming ChromaDB
+    max_chars = 20_000
+    if len(content) > max_chars:
+        content = content[:max_chars]
+    
+    success = await project_manager.add_knowledge(project_id, filename, content)
+    if success:
+        return {"status": "ok", "message": f"Indexed {filename} into project knowledge base"}
+    return {"status": "error", "message": "Failed to index — Mem0/ChromaDB may be unavailable"}
+
+
+@app.delete("/api/projects/{project_id}/knowledge/{filename}")
+async def api_remove_project_knowledge(project_id: str, filename: str):
+    """Remove a knowledge file from the project's tracking."""
+    import urllib.parse
+    filename = urllib.parse.unquote(filename)
+    project_manager.remove_knowledge(project_id, filename)
+    return {"status": "ok"}
 
 
 
@@ -1161,7 +1249,10 @@ async def build_message_content(text: str, files: list):
     import base64
     from io import BytesIO
 
-    MAX_INLINE_PDF_CHARS = 12_000
+    # Scale inline PDF excerpt to leave enough room for the response.
+    # Context window: 16384 tokens. Reserve ~4000 for system prompt + memory + response headroom.
+    # Rough heuristic: 3.5 chars per token.
+    MAX_INLINE_PDF_CHARS = 16_000  # ~4500 tokens — plenty of room at 100k context
     
     content_parts = []
     text_injections = []

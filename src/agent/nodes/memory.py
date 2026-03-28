@@ -17,11 +17,21 @@ from src.memory.personal_assistant import (
 
 def _get_mem0_user_id(state: dict) -> str:
     """
-    Return a STABLE user identifier for Mem0 so that memories are shared
-    across all chat threads.  Falls back to the user profile name, then 'owner'.
-    Previously this used thread_id which siloed memories per-thread.
+    Return a STABLE user identifier for Mem0.
+    
+    Memory scoping strategy:
+    - Non-default project → "project:<project_id>" (isolated per project)
+    - Default project     → user profile name or "owner" (shared global memory)
+    
+    This means project-specific conversations stay within that project's
+    knowledge silo, while general chats share a common memory pool.
     """
-    # Prefer explicit user name from profile
+    # Project-scoped isolation
+    project_id = state.get("project_id")
+    if project_id and project_id != "default":
+        return f"project:{project_id}"
+
+    # Global memory: use stable user identity
     try:
         profile = get_profile()
         name = (profile.get("name") or "").strip()
@@ -83,18 +93,39 @@ async def memory_inject_node(state: AgentState) -> AgentState:
             "persona": persona.get("role", "None")
         }
     
-    # Semantic search against long-term memory using a STABLE user id
-    # so that memories are shared across all chat threads (not siloed per thread).
+    # Semantic search against long-term memory.
+    # Strategy: always search project-scoped memories, and also pull global
+    # user memories so the assistant still knows who you are.
     from src.memory.long_term import memory
     mem0_uid = _get_mem0_user_id(state)
+    project_id = state.get("project_id") or "default"
     
     results = []
     if memory is not None:
-         try:
-              results_dict = await asyncio.to_thread(memory.search, user_message, user_id=mem0_uid, limit=5)
-              results = results_dict.get("results", []) if isinstance(results_dict, dict) else results_dict
-         except Exception:
-              pass
+        # 1. Project-scoped memories (or global if default project)
+        try:
+            results_dict = await asyncio.to_thread(memory.search, user_message, user_id=mem0_uid, limit=5)
+            results = results_dict.get("results", []) if isinstance(results_dict, dict) else results_dict
+        except Exception:
+            pass
+
+        # 2. If in a non-default project, also pull global user memories
+        #    so the assistant retains general knowledge about the user.
+        if project_id != "default":
+            try:
+                global_uid = "owner"
+                try:
+                    p = get_profile()
+                    n = (p.get("name") or "").strip()
+                    if n and n.lower() != "user":
+                        global_uid = n
+                except Exception:
+                    pass
+                global_dict = await asyncio.to_thread(memory.search, user_message, user_id=global_uid, limit=3)
+                global_results = global_dict.get("results", []) if isinstance(global_dict, dict) else global_dict
+                results.extend(global_results)
+            except Exception:
+                pass
 
     # Pull structured user profile
     profile = get_profile()
@@ -112,8 +143,18 @@ async def memory_inject_node(state: AgentState) -> AgentState:
         try:
             from src.memory.project import project_manager
             project = project_manager.get_project(project_id)
-            if project and project.get("instructions"):
-                project_instructions = project["instructions"]
+            if project:
+                parts = []
+                if project.get("instructions"):
+                    parts.append(project["instructions"])
+                # Include project name for context awareness
+                if project.get("name"):
+                    parts.insert(0, f"Active project: {project['name']}")
+                # Include file count so the assistant knows what's available
+                file_count = len(project.get("files", []))
+                if file_count:
+                    parts.append(f"This project has {file_count} knowledge file(s) indexed.")
+                project_instructions = "\n".join(parts)
         except Exception:
             pass
 
@@ -132,14 +173,15 @@ def format_memory_context(results: list, profile: dict, enhanced_context: str = 
     """Format memory context with profile, relevant memories, enriched personal knowledge, and project instructions."""
     lines = []
 
-    # Add project instructions first (highest priority context)
+    # Add project instructions first (highest priority — shapes all responses)
     if project_instructions:
-        lines.append("=== Project Instructions ===")
+        lines.append("=== ACTIVE PROJECT CONTEXT (follow these instructions closely) ===")
         lines.append(project_instructions)
+        lines.append("=== END PROJECT CONTEXT ===")
     
     # Add enhanced memory context (topics, interests, recent convos)
     if enhanced_context:
-        lines.append("=== Your Knowledge About User ===")
+        lines.append("\n=== Your Knowledge About User ===")
         lines.append(enhanced_context)
     
     # Add user profile (only human-relevant fields, not config)

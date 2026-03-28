@@ -58,18 +58,44 @@ def read_workspace_file(filename: str) -> str:
     try:
         if os.path.exists(cached_txt):
             with open(cached_txt, 'r', encoding='utf-8') as f:
-                return f.read()
+                content = f.read()
         elif os.path.exists(cached_md):
             with open(cached_md, 'r', encoding='utf-8') as f:
-                return f.read()
-        if filepath.lower().endswith(".pdf"):
+                content = f.read()
+        elif filepath.lower().endswith(".pdf"):
             import fitz
             doc = fitz.open(filepath)
-            text = "".join(page.get_text() + "\n\n" for page in doc)
+            content = "".join(page.get_text() + "\n\n" for page in doc)
             doc.close()
-            return text if text.strip() else "This PDF has no extractable text layer."
-        with open(filepath, 'r', encoding='utf-8') as f:
-            return f.read()
+            if not content.strip():
+                return "This PDF has no extractable text layer."
+        else:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                content = f.read()
+
+        # Smart truncation for large files — keep enough for the model to
+        # understand the structure, then tell it to use notebook_run for full data.
+        _MAX_READ_CHARS = 20000
+        if len(content) > _MAX_READ_CHARS:
+            ext = os.path.splitext(filepath)[1].lower()
+            if ext in {'.csv', '.tsv'}:
+                # For tabular data: show header + first rows + summary
+                lines = content.split('\n')
+                header_and_sample = '\n'.join(lines[:25])
+                content = (
+                    f"{header_and_sample}\n\n"
+                    f"[... {len(lines)} total rows. Showing first 25. "
+                    f"Use notebook_run with pandas to analyze the full dataset at: "
+                    f"pd.read_csv(f\"{{WORKSPACE_DIR}}/{os.path.basename(filepath)}\")]"
+                )
+            else:
+                content = (
+                    content[:_MAX_READ_CHARS]
+                    + f"\n\n[... truncated at {_MAX_READ_CHARS} chars. "
+                    f"Full file is {len(content)} chars. Use notebook_run for full processing.]"
+                )
+
+        return content
     except Exception as e:
         return f"Error reading file {filename}: {e}"
 

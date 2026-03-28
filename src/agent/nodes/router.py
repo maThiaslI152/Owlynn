@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 # max_tokens is OUTPUT only; input tokens eat into the same window.
 # We reserve headroom for input (system prompt + memory context + messages).
 
-_LARGE_MODEL_CONTEXT = 16384
+_LARGE_MODEL_CONTEXT = 100000
 _SMALL_MODEL_CONTEXT = 4096
 
 # Rough estimate: system prompt + memory context + conversation history
@@ -50,7 +50,7 @@ _BUDGET_TIERS = [
     # Complex / code-heavy / multi-step requests
     (1600, 4096),
 ]
-_BUDGET_MAX = 6144  # Anything longer than the last tier
+_BUDGET_MAX = 8192  # Anything longer than the last tier
 
 # Keywords that signal the user wants a long/detailed answer
 _LONG_ANSWER_HINTS = {

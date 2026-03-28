@@ -1531,8 +1531,12 @@ newChatBtn.addEventListener('click', async () => {
         hasSentMessageInCurrentSession = false;
         chatRegisteredInBackend = false;
         titleGenerationInFlight = false;
-        // "General" chats start unassigned (default project) until you explicitly switch/attach.
-        chatProjectIdForThread = currentView === 'welcome' ? 'default' : getEffectiveProjectId();
+        // "+ New chat" always creates a general (non-project) chat.
+        // To chat inside a project, use the composer in the project detail view.
+        chatProjectIdForThread = 'default';
+        activeProjectId = null;
+        hasSelectedProject = false;
+        localStorage.removeItem('active_project_id');
         if (sessionIdEl) sessionIdEl.value = currentSessionId;
     }
 
@@ -1596,8 +1600,47 @@ attachBtn?.addEventListener('click', () => fileInput?.click());
 fileInput.addEventListener('change', (e) => processFiles(e.target.files));
 
 // ─── Drag and Drop ──────────────────────────────────────────────────────────
+
+// Prevent browser default file-open behavior for drag-and-drop globally.
+// Without this, dropping a file anywhere opens it in the browser tab.
+document.addEventListener('dragover', (e) => { e.preventDefault(); });
+document.addEventListener('drop', (e) => { e.preventDefault(); });
+
 // ─── Drag and Drop (Chat Attachments) ───────────────────────────────────────
+// Only activate the global drag overlay when the chat or welcome view is active
+const chatView = document.getElementById('view-chat');
+const composerDock = document.querySelector('.composer-dock');
+
+function isChatOrWelcomeActive() {
+    return currentView === 'chat' || currentView === 'welcome';
+}
+
+chatView?.addEventListener('dragenter', (e) => {
+    if (!isChatOrWelcomeActive()) return;
+    e.preventDefault();
+    const types = e.dataTransfer.types;
+    if (types.includes('Files') || types.includes('application/json')) {
+        dragOverlay.classList.remove('hidden');
+        dragOverlay.classList.add('flex');
+    }
+});
+
+chatView?.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+});
+
+chatView?.addEventListener('dragleave', (e) => {
+    if (!e.relatedTarget || !chatView.contains(e.relatedTarget)) {
+        dragOverlay.classList.add('hidden');
+        dragOverlay.classList.remove('flex');
+    }
+});
+
+chatView?.addEventListener('drop', handleAttachmentDrop);
+
 chatContainer.addEventListener('dragenter', (e) => {
+    if (!isChatOrWelcomeActive()) return;
     e.preventDefault();
     const types = e.dataTransfer.types;
     if (types.includes('Files') || types.includes('application/json')) {
@@ -1611,7 +1654,6 @@ chatContainer.addEventListener('dragover', (e) => {
 });
 
 chatContainer.addEventListener('dragleave', (e) => {
-    // Only hide when truly leaving the chat container bounds
     if (!e.relatedTarget || !chatContainer.contains(e.relatedTarget)) {
         dragOverlay.classList.add('hidden');
         dragOverlay.classList.remove('flex');
@@ -1642,10 +1684,13 @@ function handleAttachmentDrop(e) {
 
 dragOverlay.addEventListener('drop', handleAttachmentDrop);
 chatContainer.addEventListener('drop', handleAttachmentDrop);
+composerDock?.addEventListener('dragover', (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; });
+composerDock?.addEventListener('drop', handleAttachmentDrop);
 welcomePane?.addEventListener('drop', handleAttachmentDrop);
 
 if (welcomePane) {
     welcomePane.addEventListener('dragenter', (e) => {
+        if (!isChatOrWelcomeActive()) return;
         e.preventDefault();
         const types = e.dataTransfer.types;
         if (types.includes('Files') || types.includes('application/json')) {
@@ -3658,6 +3703,7 @@ async function openProjectDetail(projectId) {
                     card.className = 'project-file-card';
                     card.innerHTML = `
                         <div class="file-actions">
+                            <button class="file-action-btn" data-action="index" title="Index to Knowledge Base">📚</button>
                             <button class="file-action-btn" data-action="rename" title="Rename">R</button>
                             <button class="file-action-btn danger" data-action="delete" title="Delete">×</button>
                         </div>
@@ -3668,6 +3714,10 @@ async function openProjectDetail(projectId) {
                     card.onclick = (e) => {
                         if (e.target.closest('.file-action-btn')) return;
                         openProjectFileViewer(projectId, name, ext);
+                    };
+                    card.querySelector('[data-action="index"]').onclick = (e) => {
+                        e.stopPropagation();
+                        indexProjectFile(projectId, name);
                     };
                     card.querySelector('[data-action="rename"]').onclick = (e) => {
                         e.stopPropagation();
@@ -3718,102 +3768,128 @@ async function openProjectDetail(projectId) {
         input.addEventListener('change', handler);
         input.click();
     };
+    // Project composer file attachments
+    const projPreviews = document.getElementById('projectComposerPreviews');
+    let projPendingFiles = [];
 
-    // Drag-drop on the entire project detail view
+    function renderProjectPreviews() {
+        if (!projPreviews) return;
+        if (projPendingFiles.length === 0) { projPreviews.classList.add('hidden'); return; }
+        projPreviews.classList.remove('hidden');
+        projPreviews.innerHTML = '';
+        projPendingFiles.forEach((f, i) => {
+            const chip = document.createElement('span');
+            chip.style.cssText = 'display:inline-flex;align-items:center;gap:0.3rem;padding:0.25rem 0.5rem;border-radius:4px;font-size:0.75rem;background:var(--surface-el);color:var(--text);border:1px solid var(--border)';
+            chip.textContent = f.name;
+            const x = document.createElement('button');
+            x.textContent = '\u00d7'; x.style.cssText = 'cursor:pointer;color:var(--text-muted);background:none;border:none';
+            x.onclick = () => { projPendingFiles.splice(i, 1); renderProjectPreviews(); };
+            chip.appendChild(x);
+            projPreviews.appendChild(chip);
+        });
+    }
+
+    async function refreshFileCards() {
+        const filesEl = document.getElementById('projectDetailFiles');
+        if (!filesEl) return;
+        try {
+            const res = await fetch(`${API_BASE}/api/files?sub_path=&project_id=${projectId}`);
+            const fileList = await res.json();
+            filesEl.innerHTML = '';
+            if (!fileList.length) { filesEl.innerHTML = '<p class="empty-hint">No files yet.</p>'; return; }
+            fileList.forEach(f => {
+                if (f.is_dir) return;
+                const name = f.name || f;
+                const ext = name.split('.').pop().toLowerCase();
+                const size = f.size ? `${(f.size / 1024).toFixed(1)} KB` : '';
+                const fmtClass = ['pdf'].includes(ext)?'pdf':['docx','doc'].includes(ext)?'docx':['xlsx','xls','csv'].includes(ext)?'xlsx':['pptx','ppt'].includes(ext)?'pptx':['png','jpg','jpeg','gif','svg','webp'].includes(ext)?'img':'';
+                const card = document.createElement('div');
+                card.className = 'project-file-card';
+                card.innerHTML = `<div class="file-actions"><button class="file-action-btn" data-action="rename" title="Rename">R</button><button class="file-action-btn danger" data-action="delete" title="Delete">\u00d7</button></div><span class="file-format ${fmtClass}">${ext}</span><span class="file-name" title="${DOMPurify.sanitize(name)}">${DOMPurify.sanitize(name)}</span><span class="file-size">${size}</span>`;
+                card.onclick = (e) => { if (!e.target.closest('.file-action-btn')) openProjectFileViewer(projectId, name, ext); };
+                card.querySelector('[data-action="rename"]').onclick = (e) => { e.stopPropagation(); renameProjectFile(projectId, name); };
+                card.querySelector('[data-action="delete"]').onclick = (e) => { e.stopPropagation(); deleteProjectFile(projectId, name); };
+                filesEl.appendChild(card);
+            });
+        } catch (_) {}
+    }
+
+    async function handleFileDrop(fileList) {
+        if (!fileList?.length) return;
+        for (const file of fileList) {
+            const formData = new FormData();
+            formData.append('file', file);
+            try { await fetch(`${API_BASE}/api/upload?sub_path=&project_id=${projectId}`, { method: 'POST', body: formData }); } catch (_) {}
+            try {
+                const data = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result.split(',')[1]); r.onerror = rej; r.readAsDataURL(file); });
+                projPendingFiles.push({ name: file.name, type: file.type, data });
+            } catch (_) {}
+        }
+        renderProjectPreviews();
+        setTimeout(refreshFileCards, 2500);
+    }
+
+    // View-level drag-drop — wire events directly on the drop zone AND the detail view
     const dropZone = document.getElementById('projectDropZone');
     const detailView = document.getElementById('view-project-detail');
     if (dropZone && detailView) {
-        // Ensure hidden on open
-        dropZone.classList.add('hidden');
+        // Abort previous listeners
+        if (detailView._dragAbort) detailView._dragAbort.abort();
+        const ac = new AbortController();
+        detailView._dragAbort = ac;
 
-        // Remove old listeners by cloning (prevents stacking)
-        if (detailView._dragSetup) {
-            // Already set up from a previous call — just ensure hidden
-        } else {
-            detailView._dragSetup = true;
-            let dragCounter = 0;
-            detailView.addEventListener('dragenter', (e) => {
-                e.preventDefault();
-                dragCounter++;
-                if (dragCounter === 1) dropZone.classList.remove('hidden');
-            });
-            detailView.addEventListener('dragover', (e) => { e.preventDefault(); });
-            detailView.addEventListener('dragleave', (e) => {
-                e.preventDefault();
-                dragCounter--;
-                if (dragCounter <= 0) { dragCounter = 0; dropZone.classList.add('hidden'); }
-            });
-            detailView.addEventListener('drop', async (e) => {
-                e.preventDefault();
-                dragCounter = 0;
-                dropZone.classList.add('hidden');
-                const files = e.dataTransfer?.files;
-                if (!files?.length) return;
-                const pid = detailView._currentProjectId;
-                if (!pid) return;
-                for (const file of files) {
-                    const formData = new FormData();
-                    formData.append('file', file);
-                    try {
-                        await fetch(`${API_BASE}/api/upload?sub_path=&project_id=${pid}`, { method: 'POST', body: formData });
-                    } catch (_) {}
-                }
-                setTimeout(() => openProjectDetail(pid), 2000);
-            });
-        }
-        detailView._currentProjectId = projectId;
-
-        dropZone.onclick = () => {
-            document.getElementById('projectUploadFile')?.click();
-        };
-    }
-
-    // Close split viewer
-    document.getElementById('projectViewerClose').onclick = () => {
-        document.getElementById('projectFileViewer')?.classList.add('hidden');
-    };
-
-    // Resize split viewer
-    const resizeHandle = document.getElementById('projectViewerResize');
-    const viewerPanel = document.getElementById('projectFileViewer');
-    if (resizeHandle && viewerPanel && !resizeHandle._setup) {
-        resizeHandle._setup = true;
-        let resizing = false;
-        resizeHandle.addEventListener('mousedown', (e) => {
+        // Drop zone: direct handlers (most reliable for the visible drop target)
+        dropZone.addEventListener('dragover', (e) => {
             e.preventDefault();
-            resizing = true;
-            document.body.style.cursor = 'col-resize';
-            document.body.style.userSelect = 'none';
-        });
-        window.addEventListener('mousemove', (e) => {
-            if (!resizing) return;
-            const newWidth = window.innerWidth - e.clientX;
-            if (newWidth >= 250 && newWidth <= window.innerWidth * 0.7) {
-                viewerPanel.style.width = `${newWidth}px`;
-            }
-        });
-        window.addEventListener('mouseup', () => {
-            if (resizing) { resizing = false; document.body.style.cursor = ''; document.body.style.userSelect = ''; }
-        });
+            e.stopPropagation();
+            e.dataTransfer.dropEffect = 'copy';
+            dropZone.classList.add('drag-active');
+        }, { signal: ac.signal });
+
+        dropZone.addEventListener('dragenter', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            dropZone.classList.add('drag-active');
+        }, { signal: ac.signal });
+
+        dropZone.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            dropZone.classList.remove('drag-active');
+        }, { signal: ac.signal });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            dropZone.classList.remove('drag-active');
+            handleFileDrop(e.dataTransfer?.files);
+        }, { signal: ac.signal });
+
+        // Also handle drops anywhere on the detail view (fallback)
+        detailView.addEventListener('dragover', (e) => { e.preventDefault(); }, { signal: ac.signal });
+        detailView.addEventListener('drop', (e) => {
+            e.preventDefault();
+            handleFileDrop(e.dataTransfer?.files);
+        }, { signal: ac.signal });
+
+        dropZone.onclick = () => document.getElementById('projectUploadFile')?.click();
     }
+
     document.getElementById('projectSendBtn').onclick = () => {
         const input = document.getElementById('projectInput');
         const text = input?.value?.trim();
-        if (!text) return;
+        if (!text && projPendingFiles.length === 0) return;
         switchProject(projectId, false);
+        if (projPendingFiles.length > 0) { pendingFiles.push(...projPendingFiles); projPendingFiles = []; if (projPreviews) { projPreviews.classList.add('hidden'); projPreviews.innerHTML = ''; } }
         switchView('chat');
-        messageInput.value = text;
+        messageInput.value = text || '';
         input.value = '';
         chatForm.dispatchEvent(new Event('submit'));
     };
     document.getElementById('projectInput')?.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            document.getElementById('projectSendBtn')?.click();
-        }
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); document.getElementById('projectSendBtn')?.click(); }
     });
 }
-
 function openProjectFileViewer(projectId, filename, ext) {
     const viewer = document.getElementById('projectFileViewer');
     const titleEl = document.getElementById('projectViewerTitle');
@@ -3882,6 +3958,57 @@ async function deleteProjectFile(projectId, filename) {
         await fetch(`${API_BASE}/api/files/${encodeURIComponent(filename)}?sub_path=&project_id=${projectId}`, { method: 'DELETE' });
         openProjectDetail(projectId);
     } catch (_) {}
+}
+
+async function indexProjectFile(projectId, filename) {
+    /**
+     * Manually index a file into the project's ChromaDB knowledge base.
+     * Fetches the processed text content, then sends it to the knowledge API.
+     */
+    try {
+        // Try mode=text first (processed cache or plain text fallback)
+        const textUrl = `${API_BASE}/api/files/${encodeURIComponent(filename)}?sub_path=&project_id=${projectId}&mode=text`;
+        const res = await fetch(textUrl);
+        let text = '';
+
+        if (res.ok) {
+            const contentType = res.headers.get('content-type') || '';
+            if (contentType.includes('text/plain') || contentType.includes('text/html')) {
+                text = await res.text();
+            } else {
+                // Response might be JSON error
+                try {
+                    const json = await res.json();
+                    if (json.status === 'error') {
+                        text = '';
+                    }
+                } catch (_) {
+                    text = await res.text();
+                }
+            }
+        }
+
+        if (!text || text.trim().length < 50) {
+            alert('Could not extract text from this file. Make sure the file has been processed (wait a few seconds after upload for PDFs/XLSX).');
+            return;
+        }
+
+        const indexRes = await fetch(`${API_BASE}/api/projects/${projectId}/knowledge`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ filename, content: text.trim() })
+        });
+        const data = await indexRes.json();
+        if (data.status === 'ok') {
+            alert(`Indexed "${filename}" into project knowledge base.`);
+            await loadProjects();
+        } else {
+            alert(data.message || 'Failed to index file. ChromaDB may be unavailable.');
+        }
+    } catch (e) {
+        console.error('Failed to index file:', e);
+        alert('Failed to index file. Check console for details.');
+    }
 }
 
 function showProjectContextMenu(event, project, isPinned) {

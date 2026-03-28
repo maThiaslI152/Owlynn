@@ -25,7 +25,7 @@ def _reset_notebook():
 
 
 @tool
-def notebook_run(code: str) -> str:
+def notebook_run(code: str = "") -> str:
     """
     Executes Python code in a stateful notebook environment.
     Variables, imports, and objects persist between calls within the same session.
@@ -35,9 +35,32 @@ def notebook_run(code: str) -> str:
 
     The environment is non-interactive: do NOT use input() or any blocking calls.
 
+    IMPORTANT: Files are in the workspace directory. Use the pre-defined
+    WORKSPACE_DIR variable to build file paths, e.g.:
+        df = pd.read_csv(f"{WORKSPACE_DIR}/myfile.csv")
+
     Args:
         code: Python code to execute. Variables from previous cells are available.
     """
+    if not code or not code.strip():
+        return "Error: No code provided. Please pass Python code in the 'code' parameter."
+    
+    # Inject workspace path so code can find files
+    from src.tools.workspace_context import tool_workspace_root
+    _notebook_globals["WORKSPACE_DIR"] = tool_workspace_root()
+    
+    # Auto-fix common bare filename patterns: if code references a file without
+    # WORKSPACE_DIR, prepend it. This handles the case where the LLM writes
+    # pd.read_csv('file.csv') instead of pd.read_csv(f'{WORKSPACE_DIR}/file.csv')
+    import re
+    ws_dir = tool_workspace_root()
+    # Fix read_csv, read_excel, open, etc. with bare filenames
+    code = re.sub(
+        r"""(read_csv|read_excel|read_json|read_parquet|read_table|open)\s*\(\s*(['"])(?!/)([^'"]+)\2""",
+        lambda m: f'{m.group(1)}({m.group(2)}{ws_dir}/{m.group(3)}{m.group(2)}',
+        code
+    )
+    
     global _cell_counter
     _cell_counter += 1
     cell_num = _cell_counter

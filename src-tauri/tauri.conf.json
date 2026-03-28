@@ -34,7 +34,8 @@
         "height": 800,
         "resizable": true,
         "title": "Owlynn",
-        "width": 1000
+        "width": 1000,
+        "fileDropEnabled": false
       }
     ]
   }

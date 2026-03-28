@@ -265,7 +265,8 @@
         <p id="projectDetailDesc" style="font-size:0.85rem;color:var(--text-muted);margin-bottom:1.25rem"></p>
 
         <!-- Composer -->
-        <div class="welcome-composer" style="margin-bottom:1.5rem">
+        <div class="welcome-composer" id="projectComposer" style="margin-bottom:1.5rem">
+          <div id="projectComposerPreviews" class="attachment-previews hidden"></div>
           <textarea id="projectInput" rows="2" placeholder="How can I help you today?"></textarea>
           <div class="composer-bar">
             <div class="composer-left">
@@ -299,7 +300,7 @@
             <button id="projectUploadFile" class="icon-btn" style="width:28px;height:28px;font-size:0.9rem" title="Upload">+</button>
           </div>
           <div id="projectDetailFiles" class="project-files-grid"></div>
-          <div id="projectDropZone" class="project-dropzone hidden">
+          <div id="projectDropZone" class="project-dropzone">
             Drop files here to upload
           </div>
         </div>

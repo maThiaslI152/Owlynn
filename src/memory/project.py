@@ -146,20 +146,40 @@ class ProjectManager:
     async def add_knowledge(self, project_id: str, name: str, content: str):
         """
         Adds a piece of knowledge to the project's long-term memory (ChromaDB).
+        Uses project_id as user_id for isolation from other projects.
         """
         if project_id not in self.projects:
-            return
-            
-        # Store in Mem0/ChromaDB using project_id as user_id for isolation
-        memory.add(content, user_id=project_id, metadata={"filename": name}, infer=False)
+            return False
+        if memory is None:
+            print(f"[Project] Mem0 not available, skipping knowledge indexing for {name}")
+            return False
+
+        try:
+            # Store in Mem0/ChromaDB using project_id as user_id for isolation
+            memory.add(content, user_id=f"project:{project_id}", metadata={"filename": name}, infer=False)
+        except Exception as e:
+            print(f"[Project] Failed to index {name} into ChromaDB: {e}")
+            return False
         
-        # Track in project files list
-        file_info = {
-            "name": name,
-            "type": "knowledge",
-            "added_at": time.time()
-        }
-        self.add_file_to_project(project_id, file_info)
+        # Track in project files list (avoid duplicates)
+        existing = [f for f in self.projects[project_id]["files"] if f.get("name") == name]
+        if not existing:
+            file_info = {
+                "name": name,
+                "type": "knowledge",
+                "added_at": time.time()
+            }
+            self.add_file_to_project(project_id, file_info)
+        return True
+
+    def remove_knowledge(self, project_id: str, name: str):
+        """Remove a knowledge file from the project's tracking list."""
+        if project_id not in self.projects:
+            return
+        self.projects[project_id]["files"] = [
+            f for f in self.projects[project_id]["files"] if f.get("name") != name
+        ]
+        self._save_projects()
 
     def get_workspace_path(self, project_id: str) -> Path:
         path = WORKSPACE_DIR / project_id
