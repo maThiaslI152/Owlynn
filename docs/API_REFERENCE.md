@@ -22,6 +22,20 @@ The implementation is primarily used by `frontend/script.js`, but this is writte
     { "status": "ok", "agent": "ready" | "initializing" }
     ```
 
+## Usage (Cloud Token Tracking)
+
+- `GET /api/usage`
+  - Returns cumulative session token usage for cloud (DeepSeek) API calls.
+  - Response:
+    ```json
+    {
+      "prompt_tokens": 5000,
+      "completion_tokens": 2000,
+      "total_tokens": 7000,
+      "session_id": "..."
+    }
+    ```
+
 ## Chat (WebSocket)
 
 See `docs/CHAT_PROTOCOL.md` for the payload and event contract.
@@ -123,4 +137,21 @@ Project-scoping is handled by `get_project_workspace(project_id)` and enforced w
 - WebSocket request payload keys are parsed in `websocket_endpoint()` and passed into the agent state:
   - `mode`, `web_search_enabled`, `response_style`, `project_id`
 - If you change any key names in `buildChatWsPayload()` (frontend), update this doc and the server parsing logic together.
+
+## User Profile Fields (`data/user_profile.json`)
+
+The following fields were added for the S/M(swap)/L architecture:
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `cloud_llm_base_url` | string | `"https://api.deepseek.com/v1"` | Base URL for the DeepSeek cloud API |
+| `cloud_llm_model_name` | string | `"deepseek-chat"` | Cloud model name |
+| `deepseek_api_key` | string | `""` | DeepSeek API key (env var `DEEPSEEK_API_KEY` takes priority) |
+| `medium_models` | object | `{"default": "qwen/qwen3.5-9b", "vision": "zai-org/glm-4.6v-flash", "longctx": "LFM2 8B A1B GGUF Q8_0"}` | M-tier model key mapping |
+| `cloud_escalation_enabled` | boolean | `true` | Allow routing to cloud when local models can't handle the task |
+| `cloud_anonymization_enabled` | boolean | `true` | Scrub PII before sending to cloud API |
+| `custom_sensitive_terms` | list | `[]` | Additional terms to anonymize for cloud requests |
+| `router_hitl_enabled` | boolean | `true` | Allow router to ask clarifying questions when confidence is low |
+| `router_clarification_threshold` | float | `0.6` | Confidence threshold below which router asks for clarification |
+| `redis_url` | string | `"redis://localhost:6379"` | Redis URL for conversation checkpointing |
 

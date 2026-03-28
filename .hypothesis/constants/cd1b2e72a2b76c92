@@ -1,0 +1,4 @@
+# file: /Users/tim/Works/Owlynn/src/agent/nodes/security_proxy.py
+# hypothesis_version: 6.151.9
+
+['allow', 'approve', 'approved', 'args', 'denied', 'edit_workspace_file', 'execution_approved', 'instruction', 'messages', 'name', 'notebook_run', 'pending_tool_calls', 'pending_tool_names', 'reason', 'safe_tool_calls', 'security_decision', 'security_reason', 'sensitive_tool_calls', 'title', 'tool_calls', 'true', 'type', 'unknown', 'write_workspace_file', 'y', 'yes']

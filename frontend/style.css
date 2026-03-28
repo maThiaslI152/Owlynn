@@ -412,6 +412,29 @@ input[type="range"] { accent-color: var(--accent); height: 6px; }
   font-size: 0.7rem; padding: 0.2rem 0.5rem; border-radius: 9999px;
   background: #2b2646; border: 1px solid #483d7a; color: #d3c8ff;
 }
+.model-badge-small {
+  background: #374151; color: #9ca3af; border: 1px solid #4b5563;
+}
+.model-badge-medium {
+  background: #1e3a5f; color: #93c5fd; border: 1px solid #2563eb;
+}
+.model-badge-cloud {
+  background: #2b2646; color: #d3c8ff; border: 1px solid #483d7a;
+}
+.model-badge-fallback {
+  background: #451a03; color: #fdba74; border: 1px solid #92400e;
+}
+.cloud-token-indicator {
+  display: inline-flex; align-items: center; gap: 0.2rem;
+  font-size: 0.65rem; padding: 0.15rem 0.4rem; border-radius: 9999px;
+  background: #1a1a2e; color: #a78bfa; border: 1px solid #312e81;
+  margin-left: 0.3rem;
+}
+.swap-indicator {
+  text-align: center; padding: 0.5rem; font-size: 0.8rem;
+  color: #93c5fd; opacity: 0.8; animation: pulse 1.5s ease-in-out infinite;
+}
+.swap-indicator.hidden { display: none; }
 
 @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 

@@ -198,13 +198,46 @@ Appears at bottom of each AI response:
 - **Dark Gray** - Code blocks and terminal output
 - **Red** - Errors and warnings
 
-## ⚙️ Settings
+## ⚙️ Setup
+
+### DeepSeek API Key (Cloud Escalation)
+
+To enable cloud escalation via the DeepSeek API, set your API key:
+
+```bash
+# Option A: Environment variable
+export DEEPSEEK_API_KEY=sk-...
+
+# Option B: Settings → Profile → Cloud section
+# Enter your API key in the masked field
+```
+
+Cloud escalation is optional — all local models work without it.
+
+### Redis (Short-Term Memory Backend)
+
+Redis is now used for conversation checkpointing (replaces in-memory MemorySaver). Start it alongside ChromaDB and SearXNG:
+
+```bash
+docker-compose up -d
+```
+
+Verify Redis is running:
+
+```bash
+redis-cli ping
+# Expected output: PONG
+```
+
+If Redis is unavailable, the system falls back to in-memory MemorySaver automatically.
+
+### Settings
 
 Access settings to customize:
-- **Profile**: Name, language, response style
-- **LLM Settings**: Model URL, model name
+- **Profile**: Name, language, response style, medium model variants, cloud (DeepSeek) configuration
+- **Advanced**: Cloud escalation toggle, anonymization toggle, Router HITL, clarification threshold, custom sensitive terms
+- **Memory**: Short-term (Redis URL), long-term (Mem0/ChromaDB)
 - **Persona**: Agent name, tone of voice
-- **Memories**: Store and manage facts
 
 ## 🔧 Troubleshooting
 

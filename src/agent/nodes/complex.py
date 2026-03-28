@@ -1,14 +1,25 @@
 import asyncio
+import json
+import logging
 import re
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.prebuilt import ToolNode
 
 from src.agent.state import AgentState
-from src.agent.llm import get_large_llm
+from src.agent.llm import get_large_llm, get_medium_llm, get_cloud_llm, CloudUnavailableError
+from src.agent.swap_manager import ModelSwapError
 from src.agent.response_styles import style_instruction_for_prompt
-from src.agent.tool_sets import COMPLEX_TOOLS_NO_WEB, COMPLEX_TOOLS_WITH_WEB
-from src.agent.lm_studio_compat import with_system_for_local_server
+from src.agent.tool_sets import (
+    COMPLEX_TOOLS_NO_WEB,
+    COMPLEX_TOOLS_WITH_WEB,
+    resolve_tools,
+)
+from src.agent.lm_studio_compat import is_local_server, with_system_for_local_server
+from src.agent.anonymization import anonymize, deanonymize
+from src.memory.user_profile import get_profile
+
+logger = logging.getLogger(__name__)
 
 # Context window for the large model (Qwen3.5 9B in LM Studio)
 _LARGE_CONTEXT_WINDOW = 100000
@@ -61,6 +72,7 @@ def _strip_thinking_tags(text: str) -> str:
     cleaned = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
     return cleaned if cleaned else text
 
+
 COMPLEX_PROMPT = """You are Owlynn, an expert reasoning agent. Think step by step before answering.
 Current date: {current_date}
 
@@ -93,9 +105,9 @@ Guidelines:
 - If reasoning through a problem, show your thinking clearly
 - Never fabricate facts — if uncertain, say so{style_hint}"""
 
-# Models sometimes mimic bracketed “use tool X” system text instead of emitting real tool_calls; forbid that.
+# Models sometimes mimic bracketed "use tool X" system text instead of emitting real tool_calls; forbid that.
 _TOOL_CALL_DISCIPLINE = """
-Tool discipline: You have native function/tool calling in this API. Whenever you need file contents, web results, or sandbox code, you **must** emit an actual tool/function call; the UI executes it automatically. Do **not** answer with only prose like “use read_workspace_file…” or echo bracketed instructions — call the tool, wait for results, then write your answer from those results."""
+Tool discipline: You have native function/tool calling in this API. Whenever you need file contents, web results, or sandbox code, you **must** emit an actual tool/function call; the UI executes it automatically. Do **not** answer with only prose like "use read_workspace_file…" or echo bracketed instructions — call the tool, wait for results, then write your answer from those results."""
 
 COMPLEX_TOOL_GUIDANCE_WEB = (
     """
@@ -261,7 +273,7 @@ def _fallback_for_blank_response(messages: list, *, web_search_enabled: bool) ->
             ):
                 return AIMessage(
                     content=(
-                        "I couldn’t verify this online right now because web search providers returned "
+                        "I couldn't verify this online right now because web search providers returned "
                         "errors or bot challenges. I did not find reliable live sources in this run. "
                         "If you want, I can retry with a narrower query, a different provider, or use "
                         "another source you provide."
@@ -270,14 +282,14 @@ def _fallback_for_blank_response(messages: list, *, web_search_enabled: bool) ->
     if web_search_enabled:
         return AIMessage(
             content=(
-                "I didn’t get a usable reply from the model this time (empty response). "
+                "I didn't get a usable reply from the model this time (empty response). "
                 "Try rephrasing or shortening your message, confirm your LLM server is running, "
                 "or retry. If you need live web facts, we can try again once the model responds normally."
             )
         )
     return AIMessage(
         content=(
-            "I didn’t get a usable reply from the model this time (empty response). "
+            "I didn't get a usable reply from the model this time (empty response). "
             "Try rephrasing your question or confirm your local LLM is running correctly, then retry."
         )
     )
@@ -451,6 +463,10 @@ async def complex_llm_node(state: AgentState) -> AgentState:
     """
     LLM reasoning node for the cyclic secure tool flow.
     It either answers directly or emits tool calls for the security proxy.
+
+    Supports route-based model selection (9.1), cloud anonymization (9.2),
+    dynamic tool binding (9.3), tiered fallback chains (9.4), and
+    cloud token usage tracking (9.5).
     """
     memory_context = state.get("memory_context", "None")
     persona = state.get("persona", "No persona available")
@@ -486,26 +502,207 @@ async def complex_llm_node(state: AgentState) -> AgentState:
     system = SystemMessage(content=system_text)
 
     # Trim conversation history to fit context window.
-    # Keep: first human message, last 2 tool cycles, all recent messages.
-    # Summarize older tool outputs to save tokens.
     trimmed_messages = _trim_tool_history(thread_messages)
 
-    prompt_messages = with_system_for_local_server(system, trimmed_messages)
+    # ── 9.1: Route-based model selection ─────────────────────────────────
+    route = state.get("route") or "complex-default"
+    model_label = "medium-default"
+    anon_mapping = None
+    api_tokens = None
+    profile = get_profile()
 
+    # ── 9.2: Anonymization for cloud route ───────────────────────────────
+    if route == "complex-cloud" and profile.get("cloud_anonymization_enabled", True):
+        anon_ctx = {
+            "name": profile.get("name", ""),
+            "custom_sensitive_terms": profile.get("custom_sensitive_terms", []),
+        }
+        # Anonymize system text
+        system_text, anon_mapping = anonymize(system_text, anon_ctx)
+        system = SystemMessage(content=system_text)
+        # Anonymize each message content
+        anon_messages = []
+        for msg in trimmed_messages:
+            content = msg.content
+            if isinstance(content, str):
+                content, msg_mapping = anonymize(content, anon_ctx)
+                if anon_mapping is not None:
+                    anon_mapping.update(msg_mapping)
+                else:
+                    anon_mapping = msg_mapping
+            anon_messages.append(type(msg)(content=content))
+        trimmed_messages = anon_messages
+
+    # ── 9.1 continued: Determine base_url for message format decision ────
+    if route == "complex-cloud":
+        base_url = profile.get("cloud_llm_base_url", "https://api.deepseek.com/v1")
+    else:
+        base_url = profile.get("small_llm_base_url", "http://127.0.0.1:1234/v1")
+
+    if is_local_server(base_url):
+        prompt_messages = with_system_for_local_server(system, trimmed_messages)
+    else:
+        prompt_messages = [system, *trimmed_messages]
+
+    # ── tools_off mode (no tools, no fallback chain) ─────────────────────
     if mode == "tools_off":
-        large_llm = await get_large_llm()
+        try:
+            if route == "complex-cloud":
+                llm = await get_cloud_llm()
+                model_label = "large-cloud"
+            elif route == "complex-vision":
+                llm = await get_medium_llm("vision")
+                model_label = "medium-vision"
+            elif route == "complex-longctx":
+                llm = await get_medium_llm("longctx")
+                model_label = "medium-longctx"
+            else:
+                llm = await get_medium_llm("default")
+                model_label = "medium-default"
+        except (ModelSwapError, CloudUnavailableError) as e:
+            logger.warning("[complex] Model %s unavailable (%s), falling back to medium-default", route, e)
+            llm = await get_medium_llm("default")
+            model_label = "medium-default-fallback"
+
         budget = _cap_budget_to_context(prompt_messages, state.get("token_budget") or 4096)
-        response = await large_llm.bind(max_tokens=budget).ainvoke(prompt_messages)
+        response = await llm.bind(max_tokens=budget).ainvoke(prompt_messages)
         return {
             "messages": [AIMessage(content=response.content)],
-            "model_used": "large",
+            "model_used": model_label,
             "pending_tool_calls": False,
+            "security_decision": None,
+            "security_reason": None,
+            "api_tokens_used": None,
         }
 
-    tools = COMPLEX_TOOLS_WITH_WEB if web_on else COMPLEX_TOOLS_NO_WEB
+    # ── 9.3: Dynamic tool binding ────────────────────────────────────────
+    selected_toolboxes = state.get("selected_toolboxes")
+    if selected_toolboxes and "all" not in selected_toolboxes:
+        tools = resolve_tools(selected_toolboxes, web_on)
+    else:
+        tools = list(COMPLEX_TOOLS_WITH_WEB if web_on else COMPLEX_TOOLS_NO_WEB)
+
+    # Include previously-used tools from conversation history
+    # to ensure ToolMessage references remain valid
+    prev_tool_names: set[str] = set()
+    for msg in thread_messages:
+        if hasattr(msg, 'tool_calls') and msg.tool_calls:
+            for tc in msg.tool_calls:
+                prev_tool_names.add(tc.get('name', ''))
+
+    if prev_tool_names:
+        all_tools = COMPLEX_TOOLS_WITH_WEB if web_on else COMPLEX_TOOLS_NO_WEB
+        for t in all_tools:
+            if getattr(t, 'name', '') in prev_tool_names and t not in tools:
+                tools.append(t)
+
+    # ── 9.4: Tiered fallback — model acquisition ────────────────────────
+    try:
+        if route == "complex-cloud":
+            llm = await get_cloud_llm()
+            model_label = "large-cloud"
+        elif route == "complex-vision":
+            llm = await get_medium_llm("vision")
+            model_label = "medium-vision"
+        elif route == "complex-longctx":
+            llm = await get_medium_llm("longctx")
+            model_label = "medium-longctx"
+        else:
+            llm = await get_medium_llm("default")
+            model_label = "medium-default"
+    except (ModelSwapError, CloudUnavailableError) as e:
+        logger.warning("[complex] Model %s unavailable (%s), falling back to medium-default", route, e)
+        llm = await get_medium_llm("default")
+        model_label = "medium-default-fallback"
+
     budget = _cap_budget_to_context(prompt_messages, state.get("token_budget") or 4096)
-    large_llm = (await get_large_llm()).bind_tools(tools).bind(max_tokens=budget)
-    response = await large_llm.ainvoke(prompt_messages)
+    bound_llm = llm.bind_tools(tools).bind(max_tokens=budget)
+
+    # ── 9.4: Tiered fallback — LLM invocation with error handling ────────
+    try:
+        response = await bound_llm.ainvoke(prompt_messages)
+    except Exception as e:
+        error_str = str(e).lower()
+        if route == "complex-cloud":
+            if "429" in str(e) or "rate" in error_str:
+                # Rate limit: retry after delay
+                await asyncio.sleep(2)
+                try:
+                    response = await bound_llm.ainvoke(prompt_messages)
+                except Exception:
+                    logger.warning("[complex] Cloud retry failed, falling back to medium-default")
+                    llm = await get_medium_llm("default")
+                    prompt_messages = with_system_for_local_server(system, trimmed_messages)
+                    budget = _cap_budget_to_context(prompt_messages, state.get("token_budget") or 4096)
+                    response = await llm.bind_tools(tools).bind(max_tokens=budget).ainvoke(prompt_messages)
+                    model_label = "medium-default-fallback"
+            elif "401" in str(e) or "403" in str(e):
+                # Auth error: fall back with note
+                llm = await get_medium_llm("default")
+                prompt_messages = with_system_for_local_server(system, trimmed_messages)
+                budget = _cap_budget_to_context(prompt_messages, state.get("token_budget") or 4096)
+                response = await llm.bind_tools(tools).bind(max_tokens=budget).ainvoke(prompt_messages)
+                response = AIMessage(
+                    content=(response.content or "")
+                    + "\n\n⚠️ Note: DeepSeek API key may be invalid. Check Settings → Profile → Cloud section."
+                )
+                model_label = "medium-default-fallback"
+            else:
+                logger.warning("[complex] Cloud error (%s), falling back to medium-default", e)
+                llm = await get_medium_llm("default")
+                prompt_messages = with_system_for_local_server(system, trimmed_messages)
+                budget = _cap_budget_to_context(prompt_messages, state.get("token_budget") or 4096)
+                response = await llm.bind_tools(tools).bind(max_tokens=budget).ainvoke(prompt_messages)
+                model_label = "medium-default-fallback"
+        elif route == "complex-vision":
+            logger.warning("[complex] Vision model failed (%s), falling back to medium-default", e)
+            llm = await get_medium_llm("default")
+            prompt_messages = with_system_for_local_server(system, trimmed_messages)
+            budget = _cap_budget_to_context(prompt_messages, state.get("token_budget") or 4096)
+            response = await llm.bind_tools(tools).bind(max_tokens=budget).ainvoke(prompt_messages)
+            model_label = "medium-default-fallback"
+        elif route == "complex-longctx":
+            # Try cloud first, then medium-default
+            try:
+                llm = await get_cloud_llm()
+                budget = _cap_budget_to_context([system, *trimmed_messages], state.get("token_budget") or 4096)
+                response = await llm.bind_tools(tools).bind(max_tokens=budget).ainvoke([system, *trimmed_messages])
+                model_label = "large-cloud-fallback"
+            except Exception:
+                llm = await get_medium_llm("default")
+                prompt_messages = with_system_for_local_server(system, trimmed_messages)
+                budget = _cap_budget_to_context(prompt_messages, state.get("token_budget") or 4096)
+                response = await llm.bind_tools(tools).bind(max_tokens=budget).ainvoke(prompt_messages)
+                model_label = "medium-default-fallback"
+        else:
+            raise  # medium-default failure — let it propagate
+
+    # If we fell back from cloud, skip deanonymization — fallback model got non-anonymized input
+    if "fallback" in model_label and anon_mapping:
+        anon_mapping = None
+
+    # ── 9.2 continued: Deanonymize response (before stripping think tags) ─
+    if anon_mapping and route == "complex-cloud":
+        if response.content:
+            response = AIMessage(content=deanonymize(response.content, anon_mapping))
+        if hasattr(response, 'tool_calls') and response.tool_calls:
+            for tc in response.tool_calls:
+                if tc.get('args'):
+                    args_str = json.dumps(tc['args'])
+                    args_str = deanonymize(args_str, anon_mapping)
+                    tc['args'] = json.loads(args_str)
+
+    # ── 9.5: Cloud token usage tracking ──────────────────────────────────
+    if route == "complex-cloud" and "fallback" not in model_label:
+        usage = getattr(response, 'response_metadata', {}).get('token_usage', {})
+        if not usage:
+            usage = getattr(response, 'usage_metadata', {})
+        if usage:
+            api_tokens = {
+                "prompt_tokens": usage.get("input_tokens") or usage.get("prompt_tokens", 0),
+                "completion_tokens": usage.get("output_tokens") or usage.get("completion_tokens", 0),
+            }
+
     has_tool_calls = bool(getattr(response, "tool_calls", None))
     if not has_tool_calls and not str(getattr(response, "content", "") or "").strip():
         response = _fallback_for_blank_response(
@@ -515,8 +712,9 @@ async def complex_llm_node(state: AgentState) -> AgentState:
 
     out_messages: list = [response]
 
-    # Local OpenAI-compatible servers often return plain text (“use read_workspace_file…”) instead
-    # of structured tool_calls. When uploads are clearly present, read the files here and re-prompt once.
+    # Local OpenAI-compatible servers often return plain text instead of
+    # structured tool_calls. When uploads are clearly present, read the
+    # files here and re-prompt once.
     if not has_tool_calls:
         utext = _latest_user_text(thread_messages)
         paths = _workspace_paths_from_text(utext)
@@ -531,11 +729,9 @@ async def complex_llm_node(state: AgentState) -> AgentState:
                 second_prompt = with_system_for_local_server(
                     system, thread_messages + [nudge]
                 )
-                # Re-cap budget — the document content in the nudge may have
-                # consumed a large chunk of the context window.
                 recapped = _cap_budget_to_context(second_prompt, state.get("token_budget") or 4096)
-                large_llm_recapped = (await get_large_llm()).bind_tools(tools).bind(max_tokens=recapped)
-                response = await large_llm_recapped.ainvoke(second_prompt)
+                llm_recapped = llm.bind_tools(tools).bind(max_tokens=recapped)
+                response = await llm_recapped.ainvoke(second_prompt)
                 has_tool_calls = bool(getattr(response, "tool_calls", None))
                 if not has_tool_calls and not str(getattr(response, "content", "") or "").strip():
                     response = _fallback_for_blank_response(
@@ -553,11 +749,11 @@ async def complex_llm_node(state: AgentState) -> AgentState:
 
     return {
         "messages": out_messages,
-        "model_used": "large",
+        "model_used": model_label,
         "pending_tool_calls": bool(getattr(response, "tool_calls", None)),
-        # Clear prior deny state after a fresh LLM turn.
         "security_decision": None,
         "security_reason": None,
+        "api_tokens_used": api_tokens,
     }
 
 
@@ -590,7 +786,6 @@ async def complex_tool_action_node(state: AgentState) -> AgentState:
         delta = output_messages
 
     # Truncate large tool outputs to stay within context window.
-    # With 100k context, we can afford more generous tool output.
     _MAX_TOOL_OUTPUT_CHARS = 20_000
     truncated_delta = []
     for msg in delta:
@@ -634,7 +829,6 @@ async def complex_tool_action_node(state: AgentState) -> AgentState:
                 )
                 break
             elif "ModuleNotFoundError" in content and tool_name == "notebook_run":
-                # Extract module name from error
                 import re as _re
                 mod_match = _re.search(r"No module named '([^']+)'", content)
                 mod_name = mod_match.group(1) if mod_match else "unknown"
@@ -650,7 +844,6 @@ async def complex_tool_action_node(state: AgentState) -> AgentState:
                 )
                 break
             elif "Error" in content and tool_name == "notebook_run" and "Traceback" in content:
-                # General Python error — extract the last line of the traceback
                 lines = content.strip().split('\n')
                 error_line = lines[-1] if lines else "Unknown error"
                 error_nudge.append(

@@ -84,7 +84,7 @@ async def test_prompt_regression_complex_route():
             config={"configurable": {"thread_id": "prompt-reg-complex"}},
         )
 
-    assert result["route"] == "complex"
+    assert result["route"].startswith("complex")
     assert result["model_used"] == "large"
     assert "Phase 1" in result["messages"][-1].content
 

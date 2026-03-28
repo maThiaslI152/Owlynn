@@ -1,16 +1,27 @@
 # Tools Reference
 
-## LLM-Bound Tools (20)
+## Toolbox Categories (Dynamic Selection)
 
-These tools are bound to the Qwen3.5-9B model via `src/agent/tool_sets.py`.
+Tools are organized into 5 toolbox categories. The Router selects which categories are needed per turn, and only the relevant tools are bound to the LLM — saving ~2000 tokens of schema overhead.
 
-### Web
+### How It Works
+1. The Router classifies the user request into one or more toolbox categories.
+2. `resolve_tools(toolbox_names, web_search_enabled)` returns the union of tools from the selected categories + always-included tools.
+3. The Complex_Node binds only the resolved tools to the LLM.
+4. If the Router is uncertain, it selects `"all"` to fall back to the full tool set.
+
+### Always Included
+| Tool | Description |
+|------|-------------|
+| `ask_user` | Ask a clarifying question. Supports 1-3 choice buttons + free text. Always bound regardless of toolbox selection. |
+
+### `web_search` Toolbox
 | Tool | Description |
 |------|-------------|
 | `web_search` | Search via SearXNG/DDG/Bing. Supports `focus_query` for reranking. |
 | `fetch_webpage` | Fetch URL content. Embedding-ranked excerpts with `focus_query`. |
 
-### File Management
+### `file_ops` Toolbox
 | Tool | Description |
 |------|-------------|
 | `read_workspace_file` | Read file content. Checks `.processed/` cache for PDFs. Fuzzy filename matching. |
@@ -19,42 +30,29 @@ These tools are bound to the Qwen3.5-9B model via `src/agent/tool_sets.py`.
 | `list_workspace_files` | List directory contents with file sizes. |
 | `delete_workspace_file` | Delete a file. |
 
-### Document Generation
+### `data_viz` Toolbox
 | Tool | Description |
 |------|-------------|
 | `create_docx` | Word document with headings, bullets, numbered lists. |
 | `create_xlsx` | Excel spreadsheet from CSV-like text. First row = headers. |
 | `create_pptx` | PowerPoint with slides separated by `---`. |
 | `create_pdf` | PDF from text content via PyMuPDF. |
-
-### Computation
-| Tool | Description |
-|------|-------------|
 | `notebook_run` | Stateful Python REPL. Variables persist between calls. |
 | `notebook_reset` | Clear all notebook variables. |
 
-### Memory
-| Tool | Description |
-|------|-------------|
-| `recall_memories` | Search long-term memory (keyword overlap on recent 50 entries). |
-
-### Task Management
+### `productivity` Toolbox
 | Tool | Description |
 |------|-------------|
 | `todo_add` | Add task with priority (low/medium/high). |
 | `todo_list` | List tasks. Filter by status (all/pending/done). |
 | `todo_complete` | Mark a task as done. |
-
-### Skills
-| Tool | Description |
-|------|-------------|
 | `list_skills` | List available skill templates from `skills/` directory. |
 | `invoke_skill` | Load and return a skill's prompt template. |
 
-### Human-in-the-Loop
+### `memory` Toolbox
 | Tool | Description |
 |------|-------------|
-| `ask_user` | Ask a clarifying question. Supports 1-3 choice buttons + free text. |
+| `recall_memories` | Search long-term memory (keyword overlap on recent 50 entries). |
 
 ## Security Policy
 
@@ -70,6 +68,7 @@ All other tools auto-approve. Dangerous shell patterns (rm -rf, sudo, etc.) are 
 
 1. Create `@tool` function in `src/tools/`
 2. Import in `src/agent/tool_sets.py`
-3. Add to `COMPLEX_TOOLS_WITH_WEB` and/or `COMPLEX_TOOLS_NO_WEB`
-4. Update guidance text in `src/agent/nodes/complex.py`
-5. If sensitive, add to `SENSITIVE_TOOLS` in `security_proxy.py`
+3. Add to the appropriate `TOOLBOX_REGISTRY` category (or create a new category)
+4. The tool will automatically be included when that toolbox is selected by the Router
+5. Update guidance text in `src/agent/nodes/complex.py`
+6. If sensitive, add to `SENSITIVE_TOOLS` in `security_proxy.py`

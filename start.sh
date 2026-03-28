@@ -11,7 +11,7 @@ echo "[1/4] Containers..."
 # Run podman check in background with hard 15s timeout to avoid hanging
 (
     _running=false
-    podman ps 2>/dev/null | grep -q cowork_chromadb && _running=true
+    podman ps 2>/dev/null | grep -q cowork_chromadb && podman ps 2>/dev/null | grep -q cowork_redis && _running=true
     if $_running; then
         echo "      Already running."
     else
@@ -29,6 +29,12 @@ wait $_container_pid 2>/dev/null
 kill $_timer_pid 2>/dev/null
 wait $_timer_pid 2>/dev/null
 echo "      Done."
+
+# Check Podman machine memory
+_podman_mem=$(podman machine inspect 2>/dev/null | grep -o '"Memory":[0-9]*' | grep -o '[0-9]*' || echo "0")
+if [ "$_podman_mem" -gt 0 ] && [ "$_podman_mem" -lt 2048 ]; then
+    echo "      ⚠️  Podman machine memory is low ($_podman_mem MB). Recommend: podman machine set --memory 4096"
+fi
 
 # 2. LM Studio
 echo "[2/4] LM Studio..."

@@ -46,11 +46,19 @@ class AgentState(TypedDict):
     # Track if any tool execution was vetted/approved by security node
     execution_approved: bool | None
 
-    # Routing decision: 'simple' or 'complex'
+    # Routing decision: 'simple', 'complex-default', 'complex-vision', 'complex-longctx', or 'complex-cloud'
     route: str | None
-    model_used: str | None         # 'small' or 'large'
+    # Model provenance: 'small-local', 'medium-default', 'medium-vision', 'medium-longctx',
+    # 'large-cloud', or any of these with '-fallback' suffix
+    model_used: str | None
     memory_context: str | None     # Formatted context string
     persona: str | None            # Persona summary string
+
+    # Which M-tier variant is currently loaded ("default", "vision", "longctx", or None)
+    current_medium_model: str | None
+
+    # Toolbox names selected by the router (e.g. ["web_search", "file_ops"] or ["all"])
+    selected_toolboxes: list[str] | None
 
     # Dynamic token budget — set by the router based on request complexity
     token_budget: int | None
@@ -60,5 +68,11 @@ class AgentState(TypedDict):
     pending_tool_names: Annotated[list[str], operator.add]
     security_decision: str | None  # 'approved' | 'denied'
     security_reason: str | None
+
+    # Cloud cost tracking — token usage from DeepSeek API
+    api_tokens_used: dict | None  # {"prompt_tokens": int, "completion_tokens": int}
+
+    # Whether the router asked for user clarification this turn
+    router_clarification_used: bool | None
 
 

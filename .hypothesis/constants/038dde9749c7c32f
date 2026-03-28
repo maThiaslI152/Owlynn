@@ -1,0 +1,4 @@
+# file: /Users/tim/Works/Owlynn/src/memory/user_profile.py
+# hypothesis_version: 6.151.9
+
+[0.6, 0.7, 0.9, 2048, ',', ', ', 'Chinese', 'English', 'Japanese', 'Thai', 'User', 'cloud_llm_base_url', 'cloud_llm_model_name', 'custom_instructions', 'data', 'deepseek-chat', 'deepseek_api_key', 'default', 'detailed', 'domains_of_interest', 'education_level', 'en', 'general topics', 'ja', 'large_llm_base_url', 'large_llm_model_name', 'lfm2-8b-a1b', 'liquid/lfm2.5-1.2b', 'llm_base_url', 'llm_model_name', 'long_term_enabled', 'longctx', 'max_tokens', 'medium_models', 'name', 'preferred_language', 'qwen/qwen3.5-9b', 'r', 'redis_url', 'response_style', 'router_hitl_enabled', 'short_term_enabled', 'show_thinking', 'show_tool_execution', 'small_llm_base_url', 'small_llm_model_name', 'streaming_enabled', 'system_prompt', 'temperature', 'th', 'top_k', 'top_p', 'university', 'user_profile.json', 'utf-8', 'vision', 'w', 'zh']

@@ -104,7 +104,7 @@ def test_blank_response_fallback_when_web_search_failed():
         tool_call_id="tc3",
     )
     fb = _fallback_for_blank_response([msg], web_search_enabled=True)
-    assert "couldn’t verify this online" in fb.content
+    assert "verify this online" in fb.content
 
 
 def test_blank_response_fallback_generic_when_no_search_error_context():

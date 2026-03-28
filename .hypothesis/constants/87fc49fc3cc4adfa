@@ -1,0 +1,4 @@
+# file: /Users/tim/Works/Owlynn/src/tools/doc_generator.py
+# hypothesis_version: 6.151.9
+
+['# ', '## ', '### ', '* ', ',', '- ', '---', '.docx', '.pdf', '.pptx', '.xlsx', '1. ', '2. ', '3. ', 'List Bullet', 'List Number', 'Sheet1', 'helv']

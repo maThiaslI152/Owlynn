@@ -1,0 +1,4 @@
+# file: /Users/tim/Works/Owlynn/src/agent/swap_manager.py
+# hypothesis_version: 6.151.9
+
+[120, 200, 201, 202, 204, 300, '/', 'id', 'instance_id', 'key', 'loaded_instances', 'medium_models', 'model', 'models', 'poll_interval', 'swap_timeout']

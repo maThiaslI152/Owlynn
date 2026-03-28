@@ -14,9 +14,16 @@ import logging
 logger = logging.getLogger(__name__)
 
 def route_decision(state: AgentState) -> str:
-    route = state.get("route", "complex")
-    valid = {"simple", "complex"}
-    return route if route in valid else "complex"
+    route = state.get("route", "complex-default")
+    if route == "simple":
+        return "simple"
+    # All complex-* routes map to the "complex_llm" node via the "complex" edge key.
+    # The actual 5-way route value stays in AgentState for the complex node to read.
+    valid_complex = {"complex-default", "complex-vision", "complex-longctx", "complex-cloud"}
+    if route in valid_complex:
+        return "complex"
+    # Unrecognised route → default to complex
+    return "complex"
 
 
 def llm_next_step(state: AgentState) -> str:
@@ -73,19 +80,26 @@ def build_graph():
 
 # --- Init Agent Async Wrapper ---
 from langgraph.checkpoint.memory import MemorySaver
-from src.config.settings import MCP_CONFIG_PATH
+from src.config.settings import MCP_CONFIG_PATH, REDIS_URL
 from src.tools.mcp_client import mcp_manager
 
 async def init_agent(checkpointer=None):
-    """Initializes the agent with MemorySaver checkpointer."""
+    """Initializes the agent with Redis checkpointer (falls back to MemorySaver)."""
     try:
         await mcp_manager.initialize(str(MCP_CONFIG_PATH))
     except Exception:
         pass
-    
+
     builder = build_graph()
 
     if checkpointer is None:
-        checkpointer = MemorySaver()
+        try:
+            from langgraph_checkpoint_redis import AsyncRedisSaver
+            checkpointer = AsyncRedisSaver(url=REDIS_URL)
+            await checkpointer.setup()
+            logger.info("Using Redis checkpointer at %s", REDIS_URL)
+        except Exception as e:
+            logger.warning("Redis unavailable (%s), falling back to MemorySaver", e)
+            checkpointer = MemorySaver()
 
     return builder.compile(checkpointer=checkpointer)

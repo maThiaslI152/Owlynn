@@ -415,13 +415,33 @@
               <label>Small LLM Model</label>
               <input id="profileSmallLlmModel" type="text" value="jackrong-qwen3.5-2b-claude-reasoning-abliterated-mxfp8-mlx">
             </div>
+            <!-- Medium Models -->
+            <h4 style="margin-top:1rem">Medium Models (Swappable)</h4>
             <div class="form-field">
-              <label>Large LLM URL</label>
-              <input id="profileLargeLlmUrl" type="text" value="http://127.0.0.1:1234/v1">
+              <label>Default Model</label>
+              <input id="profileMediumDefault" type="text" value="qwen/qwen3.5-9b">
             </div>
             <div class="form-field">
-              <label>Large LLM Model</label>
-              <input id="profileLargeLlmModel" type="text" value="qwen/qwen3.5-9b">
+              <label>Vision Model</label>
+              <input id="profileMediumVision" type="text" value="zai-org/glm-4.6v-flash">
+            </div>
+            <div class="form-field">
+              <label>Long Context Model</label>
+              <input id="profileMediumLongctx" type="text" value="lfm2-8b-a1b">
+            </div>
+            <!-- Cloud (DeepSeek) -->
+            <h4 style="margin-top:1rem">Cloud (DeepSeek API)</h4>
+            <div class="form-field">
+              <label>DeepSeek API URL</label>
+              <input id="profileCloudUrl" type="text" value="https://api.deepseek.com/v1">
+            </div>
+            <div class="form-field">
+              <label>DeepSeek Model</label>
+              <input id="profileCloudModel" type="text" value="deepseek-chat">
+            </div>
+            <div class="form-field">
+              <label>API Key</label>
+              <input id="profileCloudApiKey" type="password" placeholder="sk-...">
             </div>
           </div>
           <div class="form-field" style="margin-top:1rem">
@@ -483,6 +503,11 @@
             </div>
           </div>
           <div id="memoriesList" class="mini-list card"></div>
+            <h4 style="margin-top:1rem">Short-Term Memory Backend</h4>
+            <div class="form-field">
+              <label>Redis URL</label>
+              <input id="redisUrlInput" type="text" value="redis://localhost:6379">
+            </div>
         </div>
 
         <!-- Advanced Tab -->
@@ -514,6 +539,18 @@
             <label class="checkbox-row"><input type="checkbox" id="thinkingToggle"> Show thinking</label>
             <label class="checkbox-row"><input type="checkbox" id="toolVisibilityToggle" checked> Show tool execution</label>
             <label class="checkbox-row"><input type="checkbox" id="lmStudioFoldToggle" checked> LM Studio fold system prompt</label>
+            <h4 style="margin-top:1rem">Routing & Cloud</h4>
+            <label class="checkbox-row"><input type="checkbox" id="cloudEscalationToggle" checked> Cloud escalation enabled</label>
+            <label class="checkbox-row"><input type="checkbox" id="cloudAnonymizationToggle" checked> Cloud anonymization enabled</label>
+            <label class="checkbox-row"><input type="checkbox" id="routerHitlToggle" checked> Router clarification enabled</label>
+            <div class="form-field">
+              <label>Clarification threshold: <span id="thresholdValue">0.6</span></label>
+              <input type="range" id="routerThresholdSlider" min="0" max="1" step="0.05" value="0.6">
+            </div>
+            <div class="form-field">
+              <label>Custom Sensitive Terms (comma-separated)</label>
+              <textarea id="customSensitiveTerms" rows="2" placeholder="project-name, secret-code"></textarea>
+            </div>
           </div>
           <button id="saveAdvancedBtn" class="btn-accent">Save Advanced Settings</button>
         </div>

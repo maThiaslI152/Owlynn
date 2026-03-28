@@ -19,7 +19,8 @@ async def test_weather_routes_complex_when_web_search_on():
         "web_search_enabled": True,
     }
     out = await router_node(state)
-    assert out["route"] == "complex"
+    assert out["route"].startswith("complex")
+    assert "selected_toolboxes" in out
 
 
 @pytest.mark.anyio
@@ -48,4 +49,82 @@ async def test_workspace_attachment_forces_complex():
         "web_search_enabled": True,
     }
     out = await router_node(state)
-    assert out["route"] == "complex"
+    assert out["route"].startswith("complex")
+
+
+# ── Toolbox selection tests ──────────────────────────────────────────────
+
+@pytest.mark.anyio
+async def test_web_query_includes_web_search_toolbox():
+    """Web-related queries should include web_search in selected_toolboxes."""
+    state: AgentState = {
+        "messages": [HumanMessage(content="Search the web for Python tutorials")],
+        "web_search_enabled": True,
+    }
+    out = await router_node(state)
+    assert out["route"].startswith("complex")
+    assert "web_search" in out.get("selected_toolboxes", [])
+
+
+@pytest.mark.anyio
+async def test_selected_toolboxes_always_present():
+    """Every routing result should include selected_toolboxes."""
+    state: AgentState = {
+        "messages": [HumanMessage(content="Hello!")],
+        "web_search_enabled": True,
+    }
+    out = await router_node(state)
+    assert "selected_toolboxes" in out
+    assert isinstance(out["selected_toolboxes"], list)
+
+
+# ── Vision detection tests ───────────────────────────────────────────────
+
+@pytest.mark.anyio
+async def test_image_attachment_routes_to_vision():
+    """Image attachments should route to complex-vision."""
+    from unittest.mock import patch, AsyncMock
+
+    state: AgentState = {
+        "messages": [
+            HumanMessage(
+                content=[
+                    {"type": "text", "text": "Describe all objects visible in the uploaded image"},
+                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc123"}},
+                ]
+            )
+        ],
+        "web_search_enabled": True,
+    }
+    # Mock the small LLM to classify as complex
+    mock_llm = MagicMock()
+    mock_llm.bind.return_value = mock_llm
+    mock_llm.ainvoke = AsyncMock(return_value=MagicMock(
+        content='{"routing":"complex","confidence":0.9,"toolbox":"all"}'
+    ))
+    with patch("src.agent.nodes.router.get_small_llm", new_callable=AsyncMock, return_value=mock_llm):
+        out = await router_node(state)
+    assert out["route"] == "complex-vision"
+
+
+# ── Cloud escalation tests ──────────────────────────────────────────────
+
+@pytest.mark.anyio
+async def test_frontier_quality_request_routes_cloud():
+    """Frontier-quality indicators should route to complex-cloud when available."""
+    from unittest.mock import patch, AsyncMock
+
+    state: AgentState = {
+        "messages": [HumanMessage(content="Solve and prove the convergence of a complex differential equation")],
+        "web_search_enabled": True,
+    }
+    # Mock the small LLM to classify as complex
+    mock_llm = MagicMock()
+    mock_llm.bind.return_value = mock_llm
+    mock_llm.ainvoke = AsyncMock(return_value=MagicMock(
+        content='{"routing":"complex","confidence":0.9,"toolbox":"all"}'
+    ))
+    with patch("src.agent.nodes.router.get_small_llm", new_callable=AsyncMock, return_value=mock_llm), \
+         patch("src.agent.nodes.router._check_cloud_available", return_value=True):
+        out = await router_node(state)
+    assert out["route"] == "complex-cloud"

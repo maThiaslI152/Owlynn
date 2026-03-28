@@ -1,0 +1,4 @@
+# file: /Users/tim/Works/Owlynn/src/agent/llm.py
+# hypothesis_version: 6.151.9
+
+[0.2, 0.4, 512, 4096, 8192, 'SwapManager', 'cloud_llm_base_url', 'cloud_llm_model_name', 'deepseek-chat', 'deepseek_api_key', 'default', 'liquid/lfm2.5-1.2b', 'llm_base_url', 'max_output_tokens', 'medium_models', 'qwen/qwen3.5-9b', 'small_llm_base_url', 'small_llm_model_name']

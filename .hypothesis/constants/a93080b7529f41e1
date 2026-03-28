@@ -1,0 +1,4 @@
+# file: /Users/tim/Works/Owlynn/src/agent/nodes/simple.py
+# hypothesis_version: 6.151.9
+
+[0.4, 256, '"([^"]{5,})"', '%B %d, %Y', '*   ', '<think>.*?</think>', 'Thinking Process:', '^\\d+\\.\\s+\\*\\*', 'default', 'messages', 'model_used', 'response_style', 'small-local', 'token_budget']

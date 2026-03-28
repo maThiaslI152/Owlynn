@@ -20,13 +20,13 @@ SIMPLE_CASES = [
 COMPLEX_CASES = [
     (
         "Design a migration strategy from monolith to microservices with rollout phases.",
-        "complex",
+        "complex-default",
         "large",
         "LARGE: architecture plan",
     ),
     (
         "Write and explain a Python quicksort implementation with complexity analysis.",
-        "complex",
+        "complex-default",
         "large",
         "LARGE: architecture plan",
     ),

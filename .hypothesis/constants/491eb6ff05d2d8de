@@ -1,0 +1,4 @@
+# file: /Users/tim/Works/Owlynn/src/agent/graph.py
+# hypothesis_version: 6.151.9
+
+['complex', 'complex-cloud', 'complex-default', 'complex-longctx', 'complex-vision', 'complex_llm', 'execution_approved', 'memory_inject', 'memory_write', 'pending_tool_calls', 'route', 'router', 'security_proxy', 'simple', 'tool_action']

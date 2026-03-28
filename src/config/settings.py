@@ -70,6 +70,15 @@ TAVILY_API_KEY = (os.getenv("TAVILY_API_KEY", "") or "").strip()
 # SearXNG (self-hosted metasearch — recommended for local setups, no API keys / no bot blocking)
 SEARXNG_URL = (os.getenv("SEARXNG_URL", "") or "").strip()  # e.g. "http://localhost:8888"
 
+# ─── Redis & DeepSeek ──────────────────────────────────────────────────────
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
+DEEPSEEK_API_KEY = (os.getenv("DEEPSEEK_API_KEY", "") or "").strip()
+
+# Context windows per model tier
+MEDIUM_DEFAULT_CONTEXT = 100000
+MEDIUM_LONGCTX_CONTEXT = int(os.getenv("MEDIUM_LONGCTX_CONTEXT", "131072"))
+CLOUD_CONTEXT = 131072
+
 # ─── M4 MAC AIR OPTIMIZATION ───────────────────────────────────────────────
 # These settings are optimized for Mac M4 Air with small-large model architecture
 # Adjust based on your specific machine configuration
@@ -86,6 +95,11 @@ M4_MAC_OPTIMIZATION = {
         "context_length": 100000, # Qwen3.5 9B context window (set in LM Studio)
         "temperature": 0.5,
         "timeout": 120,          # seconds - longer timeout for big context
+        "cloud_timeout": 180,    # seconds - accommodate cloud API latency
+    },
+    "medium_models": {
+        "swap_timeout": 120,     # seconds - max wait for LM Studio model swap
+        "poll_interval": 2,      # seconds - poll interval during swap
     },
     "memory": {
         "max_facts": 150,        # Reduced from 200 for M4 memory

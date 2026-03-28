@@ -1,5 +1,35 @@
 # M4 LangGraph Optimization - Deployment Guide
 
+## Memory Budget (M4 Air 24 GB)
+
+The M4 Air has 24 GB unified memory shared between macOS, LM Studio, Podman containers, and the Python backend. Here's the allocation:
+
+| Component | Allocation | Notes |
+|-----------|-----------|-------|
+| LM Studio: Small model | ~730 MB | `liquid/lfm2.5-1.2b` — always loaded |
+| LM Studio: One M-tier model | up to ~8.3 GB | `qwen/qwen3.5-9b` is the largest at ~8.3 GB |
+| LM Studio: Embeddings | ~500 MB | `multilingual-e5-small` for ChromaDB |
+| **LM Studio subtotal** | **~10 GB** | |
+| Podman: ChromaDB + SearXNG + Redis | ~1–2 GB | Redis capped at 512 MB via `mem_limit` |
+| macOS + Python backend | ~4–6 GB | FastAPI, LangGraph, tool execution |
+| **Remaining for system** | **~6–8 GB** | macOS kernel, Finder, browser, etc. |
+
+### Recommended Podman Machine Memory
+
+Limit Podman Machine to 4 GB to prevent it from competing with LM Studio:
+
+```bash
+podman machine set --memory 4096
+```
+
+If Podman Machine is already running, stop and restart it:
+
+```bash
+podman machine stop
+podman machine set --memory 4096
+podman machine start
+```
+
 ## What Was Optimized
 
 Your LangGraph setup for Mac M4 Air with small-large model architecture has been optimized for **2-3x faster execution**:

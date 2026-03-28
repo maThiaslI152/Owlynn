@@ -1,0 +1,4 @@
+# file: /Users/tim/Works/Owlynn/src/tools/url_policy.py
+# hypothesis_version: 6.151.9
+
+[8192, '.', '.localhost', '0.0.0.0', '169.254.169.254', '::', 'Empty or invalid URL', 'Invalid URL', 'Missing hostname', 'URL too long', 'fc00::/7', 'http', 'https', 'localhost', 'metadata.goog']

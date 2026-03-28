@@ -63,3 +63,8 @@ def with_system_for_local_server(
     if lm_studio_fold_system_enabled():
         return fold_system_into_first_user(system, thread_messages)
     return [system, *thread_messages]
+
+
+def is_local_server(base_url: str) -> bool:
+    """True if *base_url* points to localhost / 127.0.0.1."""
+    return "127.0.0.1" in base_url or "localhost" in base_url

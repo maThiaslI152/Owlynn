@@ -38,6 +38,17 @@ _DEFAULTS = {
     # LM Studio / Qwen Jinja: merge system into first user message to avoid
     # "No user query found in messages" when using the local OpenAI server.
     "lm_studio_fold_system": True,
+    # Cloud / Medium / Router / Redis settings
+    "cloud_llm_base_url": "https://api.deepseek.com/v1",
+    "cloud_llm_model_name": "deepseek-chat",
+    "deepseek_api_key": "",
+    "medium_models": {"default": "qwen/qwen3.5-9b", "vision": "zai-org/glm-4.6v-flash", "longctx": "lfm2-8b-a1b"},
+    "cloud_escalation_enabled": True,
+    "cloud_anonymization_enabled": True,
+    "custom_sensitive_terms": [],
+    "router_hitl_enabled": True,
+    "router_clarification_threshold": 0.6,
+    "redis_url": "redis://localhost:6379",
 }
 
 VALID_FIELDS = {
@@ -67,6 +78,17 @@ VALID_FIELDS = {
     "show_thinking": bool,
     "show_tool_execution": bool,
     "lm_studio_fold_system": bool,
+    # Cloud / Medium / Router / Redis settings
+    "cloud_llm_base_url": str,
+    "cloud_llm_model_name": str,
+    "deepseek_api_key": str,
+    "medium_models": dict,
+    "cloud_escalation_enabled": bool,
+    "cloud_anonymization_enabled": bool,
+    "custom_sensitive_terms": list,
+    "router_hitl_enabled": bool,
+    "router_clarification_threshold": (int, float),
+    "redis_url": str,
 }
 
 

@@ -1,0 +1,4 @@
+# file: /Users/tim/Works/Owlynn/src/agent/response_styles.py
+# hypothesis_version: 6.151.9
+
+['concise', 'explanatory', 'formal', 'learning', 'normal']

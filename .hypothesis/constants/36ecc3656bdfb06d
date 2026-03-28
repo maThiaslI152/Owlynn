@@ -1,0 +1,4 @@
+# file: /Users/tim/Works/Owlynn/src/agent/nodes/memory.py
+# hypothesis_version: 6.151.9
+
+[300, 'None', 'ai', 'assistant', 'content', 'custom_instructions', 'default', 'domains_of_interest', 'files', 'human', 'instructions', 'large_llm_base_url', 'large_llm_model_name', 'llm_base_url', 'llm_model_name', 'long_term_enabled', 'max_tokens', 'memory_context', 'messages', 'name', 'owner', 'persona', 'project_id', 'results', 'role', 'session_id', 'short_term_enabled', 'show_thinking', 'show_tool_execution', 'small_llm_base_url', 'small_llm_model_name', 'streaming_enabled', 'system_prompt', 'temperature', 'thread_id', 'top_k', 'top_p', 'type', 'user']

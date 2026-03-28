@@ -1,0 +1,4 @@
+# file: /Users/tim/Works/Owlynn/src/agent/tool_sets.py
+# hypothesis_version: 6.151.9
+
+['all', 'data_viz', 'file_ops', 'memory', 'productivity', 'web_search']

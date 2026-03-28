@@ -122,6 +122,44 @@ function formatToolLabel(name) {
     return String(name).replace(/_/g, ' ');
 }
 
+function getModelBadgeClass(model) {
+    if (!model) return 'model-badge-small';
+    if (model.includes('fallback')) return 'model-badge-fallback';
+    if (model.startsWith('large') || model.startsWith('cloud')) return 'model-badge-cloud';
+    if (model.startsWith('medium')) return 'model-badge-medium';
+    return 'model-badge-small';
+}
+
+function getModelBadgeIcon(model) {
+    if (!model) return '';
+    if (model.includes('fallback')) return '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
+    if (model.startsWith('large') || model.startsWith('cloud')) return '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg>';
+    return '';
+}
+
+function renderTokenUsage(tokenUsage) {
+    if (!tokenUsage || (!tokenUsage.prompt_tokens && !tokenUsage.completion_tokens)) return '';
+    return `<span class="cloud-token-indicator">↑${tokenUsage.prompt_tokens} ↓${tokenUsage.completion_tokens}</span>`;
+}
+
+function showSwapIndicator(model) {
+    let el = document.getElementById('swapIndicator');
+    if (!el) {
+        el = document.createElement('div');
+        el.id = 'swapIndicator';
+        el.className = 'swap-indicator';
+        document.getElementById('chatMessages')?.appendChild(el);
+    }
+    const label = model ? model.replace('medium-', '').replace('large-', '') : 'model';
+    el.textContent = `Switching to ${label} model...`;
+    el.classList.remove('hidden');
+}
+
+function hideSwapIndicator() {
+    const el = document.getElementById('swapIndicator');
+    if (el) el.classList.add('hidden');
+}
+
 function showThinkingIndicator() {
     if (thinkingIndicatorEl) return;
     const wrapper = document.createElement('div');
@@ -298,15 +336,20 @@ async function loadSettingsData() {
         if (profileStyleInput) profileStyleInput.value = profile.response_style || 'detailed';
         if (profileLlmUrlInput) profileLlmUrlInput.value = profile.llm_base_url || 'http://127.0.0.1:8080/v1';
         if (profileLlmModelInput) profileLlmModelInput.value = profile.llm_model_name || 'qwen/qwen3.5-9b';
-        // Populate new small/large LLM fields
+        // Populate new small/medium/cloud LLM fields
         const smallUrlEl = document.getElementById('profileSmallLlmUrl');
         const smallModelEl = document.getElementById('profileSmallLlmModel');
-        const largeUrlEl = document.getElementById('profileLargeLlmUrl');
-        const largeModelEl = document.getElementById('profileLargeLlmModel');
         if (smallUrlEl) smallUrlEl.value = profile.small_llm_base_url || 'http://127.0.0.1:1234/v1';
         if (smallModelEl) smallModelEl.value = profile.small_llm_model_name || '';
-        if (largeUrlEl) largeUrlEl.value = profile.large_llm_base_url || 'http://127.0.0.1:1234/v1';
-        if (largeModelEl) largeModelEl.value = profile.large_llm_model_name || '';
+
+        // Medium models
+        const medModels = profile.medium_models || {};
+        document.getElementById('profileMediumDefault').value = medModels.default || 'qwen/qwen3.5-9b';
+        document.getElementById('profileMediumVision').value = medModels.vision || 'zai-org/glm-4.6v-flash';
+        document.getElementById('profileMediumLongctx').value = medModels.longctx || 'lfm2-8b-a1b';
+        document.getElementById('profileCloudUrl').value = profile.cloud_llm_base_url || 'https://api.deepseek.com/v1';
+        document.getElementById('profileCloudModel').value = profile.cloud_llm_model_name || 'deepseek-chat';
+        document.getElementById('profileCloudApiKey').value = profile.deepseek_api_key ? '••••••••' : '';
 
         updateComposerStyleQuickLabel();
 
@@ -347,6 +390,15 @@ async function loadSettingsData() {
         if (streamingToggle) streamingToggle.checked = advancedSettings.streaming_enabled !== false;
         if (thinkingToggle) thinkingToggle.checked = advancedSettings.show_thinking || false;
         if (toolVisibilityToggle) toolVisibilityToggle.checked = advancedSettings.show_tool_execution !== false;
+
+        // Populate Routing & Cloud advanced settings
+        document.getElementById('cloudEscalationToggle').checked = profile.cloud_escalation_enabled !== false;
+        document.getElementById('cloudAnonymizationToggle').checked = profile.cloud_anonymization_enabled !== false;
+        document.getElementById('routerHitlToggle').checked = profile.router_hitl_enabled !== false;
+        document.getElementById('routerThresholdSlider').value = profile.router_clarification_threshold || 0.6;
+        document.getElementById('thresholdValue').textContent = profile.router_clarification_threshold || 0.6;
+        document.getElementById('customSensitiveTerms').value = (profile.custom_sensitive_terms || []).join(', ');
+        document.getElementById('redisUrlInput').value = profile.redis_url || 'redis://localhost:6379';
 
         // Populate Memories
         if (memoriesCountEl) memoriesCountEl.innerText = memories.length || 0;
@@ -1426,7 +1478,13 @@ topKSlider?.addEventListener('input', (e) => {
     topKValue.textContent = parseInt(e.target.value);
 });
 
+document.getElementById('routerThresholdSlider')?.addEventListener('input', (e) => {
+    document.getElementById('thresholdValue').textContent = e.target.value;
+});
+
 saveAdvancedBtn?.addEventListener('click', async () => {
+    const customTermsRaw = document.getElementById('customSensitiveTerms')?.value || '';
+    const customTerms = customTermsRaw.split(',').map(t => t.trim()).filter(Boolean);
     const data = {
         temperature: parseFloat(temperatureSlider.value),
         top_p: parseFloat(topPSlider.value),
@@ -1434,7 +1492,13 @@ saveAdvancedBtn?.addEventListener('click', async () => {
         top_k: parseInt(topKSlider.value),
         streaming_enabled: streamingToggle.checked,
         show_thinking: thinkingToggle.checked,
-        show_tool_execution: toolVisibilityToggle.checked
+        show_tool_execution: toolVisibilityToggle.checked,
+        cloud_escalation_enabled: document.getElementById('cloudEscalationToggle')?.checked ?? true,
+        cloud_anonymization_enabled: document.getElementById('cloudAnonymizationToggle')?.checked ?? true,
+        router_hitl_enabled: document.getElementById('routerHitlToggle')?.checked ?? true,
+        router_clarification_threshold: parseFloat(document.getElementById('routerThresholdSlider')?.value || 0.6),
+        custom_sensitive_terms: customTerms,
+        redis_url: document.getElementById('redisUrlInput')?.value || 'redis://localhost:6379',
     };
     try {
         await fetch(API_BASE + '/api/advanced-settings', {
@@ -1450,6 +1514,12 @@ saveAdvancedBtn?.addEventListener('click', async () => {
 });
 
 saveProfileBtn?.addEventListener('click', async () => {
+    const mediumModels = {
+        default: document.getElementById('profileMediumDefault').value,
+        vision: document.getElementById('profileMediumVision').value,
+        longctx: document.getElementById('profileMediumLongctx').value,
+    };
+    const cloudApiKeyVal = document.getElementById('profileCloudApiKey')?.value;
     const data = {
         name: profileNameInput?.value,
         preferred_language: profileLangInput?.value,
@@ -1458,9 +1528,14 @@ saveProfileBtn?.addEventListener('click', async () => {
         llm_model_name: profileLlmModelInput?.value,
         small_llm_base_url: document.getElementById('profileSmallLlmUrl')?.value,
         small_llm_model_name: document.getElementById('profileSmallLlmModel')?.value,
-        large_llm_base_url: document.getElementById('profileLargeLlmUrl')?.value,
-        large_llm_model_name: document.getElementById('profileLargeLlmModel')?.value,
+        medium_models: mediumModels,
+        cloud_llm_base_url: document.getElementById('profileCloudUrl')?.value,
+        cloud_llm_model_name: document.getElementById('profileCloudModel')?.value,
     };
+    // Only include API key if user changed it (not the masked placeholder)
+    if (cloudApiKeyVal && cloudApiKeyVal !== '••••••••') {
+        data.deepseek_api_key = cloudApiKeyVal;
+    }
     // Remove undefined/null entries
     Object.keys(data).forEach(k => { if (data[k] == null) delete data[k]; });
     try {
@@ -1750,6 +1825,11 @@ function connectWebSocket() {
         } else if (data.type === 'model_info') {
             // Track which model was used
             currentModelUsed = data.model || 'unknown';
+            if (data.swapping) {
+                showSwapIndicator(data.model);
+            } else {
+                hideSwapIndicator();
+            }
         } else if (data.type === 'message') {
             renderMessage(data.message);
         } else if (data.type === 'chunk') {
@@ -2486,9 +2566,11 @@ function addMessageActions(contentDiv, textContent, wrapper) {
         explanatory: 'Explanatory',
         formal: 'Formal',
     };
+    const badgeClass = getModelBadgeClass(currentModelUsed);
+    const badgeIcon = getModelBadgeIcon(currentModelUsed);
     const infoBadge = document.createElement('div');
-    infoBadge.className = 'model-info-badge';
-    infoBadge.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20h16"/><path d="M6 16l4-8 4 6 2-3 2 5"/></svg> <span>Style: ${DOMPurify.sanitize(styleMap[responseStyle] || 'Normal')}</span>`;
+    infoBadge.className = `model-info-badge ${badgeClass}`;
+    infoBadge.innerHTML = `${badgeIcon} <span>${DOMPurify.sanitize(currentModelUsed || 'unknown')}</span> · <span>Style: ${DOMPurify.sanitize(styleMap[responseStyle] || 'Normal')}</span>`;
     actionsDiv.appendChild(infoBadge);
     
     const buttonsDiv = document.createElement('div');

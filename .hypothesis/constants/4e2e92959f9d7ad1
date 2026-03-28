@@ -1,0 +1,4 @@
+# file: /Users/tim/Works/Owlynn/src/api/file_processor.py
+# hypothesis_version: 6.151.9
+
+[1.0, -500, 100, 200, 500, 100000, '\n```', ' | ', '"""(.*?)"""', '# Log File\n\n', '# SQLite Database\n\n', '# XML File\n\n```xml\n', '## Content\n\n```\n', '## File List\n\n', '**Columns:**\n', '--workspace', '.', './workspace', '.7z', '.c', '.conf', '.config', '.cpp', '.csv', '.db', '.docx', '.epub', '.go', '.gz', '.htm', '.html', '.ini', '.java', '.js', '.json', '.log', '.markdown', '.md', '.pdf', '.php', '.pptx', '.processed', '.py', '.rar', '.rb', '.rs', '.rtf', '.sqlite', '.sqlite3', '.tar', '.toml', '.ts', '.tsv', '.txt', '.xhtml', '.xls', '.xlsx', '.xml', '.yaml', '.yml', '.zip', '<[^>]+>', 'HTML Document', '[{}]', '\\\\[a-z]+\\d*\\s?', '\\n\\s*\\n', '^\\s*class\\s+\\w+', '^\\s*def\\s+\\w+', '__main__', '```\n', '```\n\n', 'error', 'html.parser', 'nav', 'processed', 'r', 'r:*', 'rb', 'replace', 'script', 'style', 'unicode', 'utf-8', 'w']

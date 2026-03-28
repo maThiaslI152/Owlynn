@@ -1,0 +1,4 @@
+# file: /Users/tim/Works/Owlynn/src/memory/long_term.py
+# hypothesis_version: 6.151.9
+
+[768, 8100, 'OPENAI_API_KEY', 'chroma', 'collection_name', 'config', 'cowork_memory_nomic', 'embedder', 'embedding_dims', 'host', 'lmstudio', 'lmstudio_base_url', 'localhost', 'model', 'port', 'provider', 'sk-dummy-key', 'vector_store']

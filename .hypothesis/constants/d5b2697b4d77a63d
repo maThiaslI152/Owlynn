@@ -1,0 +1,4 @@
+# file: /Users/tim/Works/Owlynn/src/memory/memory_manager.py
+# hypothesis_version: 6.151.9
+
+[200, '[a-z\\u0e00-\\u0e7f]+', 'data', 'fact', 'memories.json', 'r', 'timestamp', 'utf-8', 'w']

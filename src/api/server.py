@@ -18,6 +18,7 @@ from langgraph.types import Command
 
 from src.agent.graph import init_agent
 from src.agent.nodes.router import generate_chat_title_router_llm
+from src.agent.llm import LLMPool
 from src.memory.user_profile import get_profile, update_profile
 from src.memory.persona import get_persona, update_persona_field
 from src.memory.memory_manager import load_memories, save_memory, delete_memory
@@ -116,17 +117,34 @@ app.mount("/vendor", StaticFiles(directory=os.path.join(FRONTEND_DIR, "vendor"))
 
 # ─── REST API endpoints ──────────────────────────────────────────────────────
 
+# Track cumulative session token usage
+_session_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+
+# Profile fields that require clearing cached LLM instances when changed
+_LLM_SENSITIVE_FIELDS = {
+    "cloud_llm_base_url", "cloud_llm_model_name", "deepseek_api_key",
+    "medium_models", "small_llm_base_url", "small_llm_model_name",
+}
+
+@app.get("/api/usage")
+async def api_get_usage():
+    """Return cumulative cloud token usage for the current session."""
+    return _session_usage
+
 @app.get("/api/profile")
 async def api_get_profile():
     return get_profile()
 
 @app.post("/api/profile")
 async def api_update_profile(body: dict):
+    needs_llm_clear = any(f in body for f in _LLM_SENSITIVE_FIELDS)
     for field, value in body.items():
         try:
             update_profile(field, value)
         except Exception:
             pass
+    if needs_llm_clear:
+        LLMPool.clear()
     return get_profile()
 
 @app.get("/api/persona")
@@ -231,7 +249,11 @@ async def api_health():
 async def api_update_advanced_settings(body: dict):
     """Update inference and behavior settings."""
     try:
-        for field in ["temperature", "top_p", "max_tokens", "top_k", "streaming_enabled", "show_thinking", "show_tool_execution"]:
+        for field in ["temperature", "top_p", "max_tokens", "top_k", "streaming_enabled",
+                       "show_thinking", "show_tool_execution",
+                       "cloud_escalation_enabled", "cloud_anonymization_enabled",
+                       "router_hitl_enabled", "router_clarification_threshold",
+                       "custom_sensitive_terms"]:
             if field in body:
                 update_profile(field, body[field])
         return {"status": "ok", "message": "Advanced settings saved"}
@@ -1071,9 +1093,32 @@ async def websocket_endpoint(websocket: WebSocket, thread_id: str):
                                     if isinstance(msg, AIMessage)
                                     else str(getattr(msg, "content", "") or "").strip()
                                 )
+
+                                # Extract model provenance and token usage from node output
+                                _node_model_used = output.get("model_used")
+                                _node_token_usage = output.get("api_tokens_used")
+
+                                # Send model_info event so frontend can show badge
+                                if _node_model_used:
+                                    await websocket.send_json({
+                                        "type": "model_info",
+                                        "model": _node_model_used,
+                                        "swapping": False,
+                                    })
+
+                                # Accumulate cloud token usage into session totals
+                                if _node_token_usage and isinstance(_node_token_usage, dict):
+                                    _session_usage["prompt_tokens"] += int(_node_token_usage.get("prompt_tokens", 0))
+                                    _session_usage["completion_tokens"] += int(_node_token_usage.get("completion_tokens", 0))
+                                    _session_usage["total_tokens"] = _session_usage["prompt_tokens"] + _session_usage["completion_tokens"]
+
                                 if tc_list:
                                     # Include reasoning / pre-tool text in the same payload (serialize_message flattens content).
                                     aw_msg = serialize_message(msg)
+                                    if _node_model_used:
+                                        aw_msg["model_used"] = _node_model_used
+                                    if _node_token_usage:
+                                        aw_msg["token_usage"] = _node_token_usage
                                     await websocket.send_json({"type": "message", "message": aw_msg})
                                     for tc in tc_list:
                                         tool_call_id = str(tc.get("id") or tc.get("tool_call_id") or f"pending-{len(pending_tool_calls)+1}")
@@ -1086,7 +1131,12 @@ async def websocket_endpoint(websocket: WebSocket, thread_id: str):
                                 if text_for_ui and not tc_list:
                                     # Final assistant text after tools (or non-streaming turns). Without this,
                                     # the UI only saw chunks; if streaming missed events, the answer was blank.
-                                    await websocket.send_json({"type": "message", "message": serialize_message(msg)})
+                                    final_msg = serialize_message(msg)
+                                    if _node_model_used:
+                                        final_msg["model_used"] = _node_model_used
+                                    if _node_token_usage:
+                                        final_msg["token_usage"] = _node_token_usage
+                                    await websocket.send_json({"type": "message", "message": final_msg})
                         elif node in {"tool_action", "tools"} or metadata.get("langgraph_step") == "tools":
                             if isinstance(output, dict) and "messages" in output:
                                 for msg in output["messages"]:

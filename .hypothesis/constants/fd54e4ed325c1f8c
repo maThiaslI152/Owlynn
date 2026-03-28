@@ -1,0 +1,4 @@
+# file: /Users/tim/Works/Owlynn/src/tools/todo.py
+# hypothesis_version: 6.151.9
+
+['%Y-%m-%d %H:%M', 'all', 'completed_at', 'created_at', 'done', 'high', 'id', 'low', 'medium', 'pending', 'priority', 'status', 'task', 'todos.json', 'utf-8', '⚪', '✅', '⬜', '📋 Todo List:', '🔴', '🟡', '🟢']

@@ -71,13 +71,13 @@ async def simple_node(state: AgentState) -> AgentState:
         llm = await get_small_llm()
         response = await llm.bind(temperature=0.4, max_tokens=budget).ainvoke(prompt)
         content = _clean_response(response.content or "")
-        model = "small"
+        model = "small-local"
     except Exception as e:
-        logger.warning("[simple] Small model failed (%s), falling back to large", e)
-        from src.agent.llm import get_large_llm
-        llm = await get_large_llm()
+        logger.warning("[simple] Small model failed (%s), falling back to medium-default", e)
+        from src.agent.llm import get_medium_llm
+        llm = await get_medium_llm("default")
         response = await llm.bind(temperature=0.4, max_tokens=budget).ainvoke(prompt)
         content = _clean_response(response.content or "")
-        model = "large"
+        model = "medium-default-fallback"
 
     return {"messages": [AIMessage(content=content)], "model_used": model}
