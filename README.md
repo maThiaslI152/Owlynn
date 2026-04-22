@@ -65,6 +65,8 @@ Reusable prompt templates in `skills/`. Zero token cost until invoked.
 - [Tools Reference](docs/TOOLS.md)
 - [Chat Protocol](docs/CHAT_PROTOCOL.md)
 - [API Reference](docs/API_REFERENCE.md)
+- [Human Project Guide](docs/HUMAN_PROJECT_GUIDE.md)
+- [AI Agent Project Guide](docs/AI_AGENT_PROJECT_GUIDE.md)
 
 ## Project Structure
 
