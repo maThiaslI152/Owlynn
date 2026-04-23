@@ -3,667 +3,300 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Owlynn — AI Cowork Agent</title>
-  <!-- Tailwind (local) -->
-  <script src="vendor/tailwind.js"></script>
-  <script>
-    tailwind.config = {
-      theme: {
-        extend: {
-          colors: {
-            cloud: '#0d1321',
-            anthropic: '#b08d3e',
-            userbubble: '#151d33',
-            bordercolor: '#232e48',
-            textdark: '#d4dae8'
-          },
-          fontFamily: {
-            sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
-          }
-        }
-      }
-    }
-  </script>
+  <title>Owlynn — Aurora AI</title>
   <link rel="stylesheet" href="style.css">
 </head>
-<body id="appShell">
-
-  <!-- Mobile sidebar overlay -->
-  <div id="sidebarOverlay" class="sidebar-overlay" onclick="App.toggleSidebar(false)"></div>
-
-  <!-- Drag overlay -->
-  <div id="dragOverlay" class="drag-overlay hidden">
-    <div class="drag-overlay-inner">
-      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-      <p>Drop files here</p>
-      <span>Images, PDFs, documents, code files</span>
-    </div>
-  </div>
-
-  <!-- ─── Sidebar ─── -->
-  <aside id="sidebar" class="sidebar">
-    <div class="sidebar-header">
-      <div class="sidebar-brand">
-        <div class="brand-icon">O</div>
-        <span class="brand-name">Owlynn</span>
+<body>
+  <div id="auroraShell">
+    <!-- Title Bar -->
+    <div id="titleBar">
+      <span class="title-brand">OWLYNN AI</span>
+      <div class="title-status">
+        <span class="aurora-dot offline" id="statusDot"></span>
+        <span id="statusText">Offline</span>
       </div>
+      <div class="title-spacer"></div>
+      <span id="sessionTokenUsage"></span>
+      <button class="icon-btn" id="settingsBtn" title="Settings">
+        <i data-lucide="settings"></i>
+      </button>
     </div>
 
-    <div class="sidebar-body">
-      <div class="sidebar-section">
-        <button id="newChatBtn" class="btn-new-chat">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-          New chat
-        </button>
-      </div>
-
-      <nav id="mainNav" class="sidebar-nav">
-        <button class="nav-item" data-view="search">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          Search
-        </button>
-        <button class="nav-item" data-view="chats">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-          Chats
-        </button>
-        <button class="nav-item" data-view="projects">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-          Projects
-        </button>
-        <button class="nav-item" data-view="customize">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
-          Customize
-        </button>
-      </nav>
-
-      <div class="sidebar-section sidebar-recents">
-        <h3 class="section-label">Recents</h3>
-        <div id="sidebarRecentsList" class="recents-list">
-          <p class="empty-hint">No recent chats</p>
-        </div>
-      </div>
-    </div>
-
-    <div class="sidebar-footer">
-      <div class="status-bar">
-        <div class="status-indicator">
-          <div id="connectionStatusDot" class="status-dot offline"></div>
-          <span id="connectionStatusText">Offline</span>
-        </div>
-        <span id="agentStatus">Idle</span>
-      </div>
-    </div>
-  </aside>
-
-  <!-- ─── Workspace Panel ─── -->
-  <div id="workspacePanel" class="workspace-panel hidden">
-    <div id="workspaceResizeHandle" class="resize-handle"></div>
-    <div class="workspace-header">
-      <h2 class="workspace-title">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 22h14a2 2 0 0 0 2-2V7.5L14.5 2H6a2 2 0 0 0-2 2v4"/><polyline points="14 2 14 8 20 8"/></svg>
-        <span id="workspaceTitleText">Workspace</span>
-      </h2>
-      <div class="workspace-actions">
-        <button id="newFolderBtn" class="icon-btn" title="New Folder">
-          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/><line x1="12" y1="9" x2="12" y2="15"/><line x1="9" y1="12" x2="15" y2="12"/></svg>
-        </button>
-        <button id="uploadWorkspaceBtn" class="icon-btn" title="Upload">
-          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-        </button>
-      </div>
-      <input type="file" id="workspaceFileInput" class="hidden" multiple accept="image/*,.pdf,.py,.txt,.md,.csv,.xlsx,.xls,.docx,.pptx,.epub,.rtf,.json,.yaml,.yml,.toml,.html,.xml,.log,.zip,.tar,.gz">
-    </div>
-    <div id="workspaceBreadcrumbs" class="breadcrumbs">
-      <span class="breadcrumb-item" id="breadcrumbRoot">Workspace</span>
-    </div>
-    <div id="workspaceFilesList" class="workspace-files">
-      <p class="empty-hint">Loading files...</p>
-    </div>
-    <div id="workspaceDropZone" class="workspace-dropzone hidden">
-      <p>Drop to Upload</p>
-    </div>
-  </div>
-
-  <!-- ─── Main Content ─── -->
-  <main class="main-content">
-
-    <!-- View: Welcome -->
-    <div id="view-welcome" class="view active">
-      <header class="mobile-header">
-        <button onclick="App.toggleSidebar(true)" class="icon-btn">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
-        </button>
-        <span class="mobile-title">Owlynn</span>
-        <div style="width:32px"></div>
-      </header>
-      <div class="welcome-center">
-        <h1 class="welcome-heading" id="welcomeHeading">What can I help with?</h1>
-        <div class="welcome-composer">
-          <textarea id="welcomeInput" rows="2" placeholder="Ask anything, or try: research, summarize, briefing, todo..."></textarea>
-          <div class="composer-bar">
-            <div class="composer-left">
-              <button type="button" id="welcomeAttachBtn" class="icon-btn" title="Attach files">+</button>
-            </div>
-            <div class="composer-right">
-              <button type="button" id="welcomeStyleBtn" class="style-pill">
-                <span id="welcomeStyleLabel">Normal</span>
-              </button>
-              <button type="button" id="welcomeSendBtn" class="send-btn" title="Send">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-              </button>
-            </div>
+    <!-- 3-Column Layout -->
+    <div id="auroraColumns">
+      <!-- Left: Project Explorer -->
+      <div id="projectExplorer">
+        <div class="pane-header">
+          <span>Explorer</span>
+          <div class="pane-header-actions">
+            <button id="newProjectBtn" class="pv-action-btn" title="New Project">
+              <i data-lucide="folder-plus"></i>
+            </button>
+            <button id="collapseLeftBtn" title="Hide Explorer">◀</button>
           </div>
-          <div id="welcomeAttachmentPreviews" class="attachment-previews hidden"></div>
         </div>
+        <div id="projectTree"><div style="padding:8px;font-size:12px;color:#888;">Loading projects...</div></div>
       </div>
-    </div>
 
-    <!-- View: Chat -->
-    <div id="view-chat" class="view">
-      <header class="mobile-header">
-        <button onclick="App.toggleSidebar(true)" class="icon-btn">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
-        </button>
-        <span class="mobile-title" id="chatMobileTitle">Owlynn</span>
-        <button id="stopBtn" class="icon-btn hidden" title="Stop generation">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
-        </button>
-      </header>
-      <div id="chatContainer" class="chat-container">
-        <div id="messagesArea" class="messages-area"></div>
-      </div>
-      <div class="composer-dock">
-        <div class="composer-wrapper">
+      <!-- Center: Orchestrator Panel -->
+      <div id="orchestratorPanel">
+        <div class="pane-resize-handle left"></div>
+
+        <!-- Expand tabs (visible when side panels are collapsed) -->
+        <button id="expandLeftTab" class="expand-tab" title="Show Explorer">▶</button>
+        <button id="expandRightTab" class="expand-tab" title="Show Knowledge Map">◀</button>
+
+        <!-- Project Header -->
+        <div id="projectHeader">
+          <span id="projectName">Project: General Workspace</span>
+          <span id="contextCount">Context: 0/0 Files</span>
+        </div>
+
+        <!-- Tab Navigation -->
+        <div id="tabNav">
+          <button class="tab active" data-tab="chat">Chat</button>
+          <button class="tab" data-tab="stage">Stage</button>
+        </div>
+
+        <!-- Chat View -->
+        <div id="chatView">
+          <div id="contextHealthBar"><!-- ContextHealthBar renders here --></div>
+          <div id="greetingView" class="welcome-center">
+            <h1 class="welcome-heading" id="greetingText">Good morning, User.</h1>
+            <p style="color: var(--text-muted); font-size: 0.95rem;">How can I assist you today?</p>
+          </div>
+          <div class="chat-container" id="chatContainer">
+            <div class="messages-area" id="messagesArea"></div>
+          </div>
+        </div>
+
+        <!-- Stage View (hidden by default) -->
+        <div id="stageView" class="hidden">
+          <div id="stageHeader"><!-- filename, type, modified indicator --></div>
+          <div id="toolDock"><!-- ToolDock renders here --></div>
+          <div id="editorContainer"><!-- CodeMirror instance --></div>
+        </div>
+
+        <!-- Bottom Input Bar (moved inside orchestrator) -->
+        <div id="bottomBar">
           <div id="attachmentPreviews" class="attachment-previews hidden"></div>
-          <form id="chatForm" class="composer-shell">
-            <input type="file" id="fileInput" class="hidden" multiple accept="image/*,.pdf,.py,.txt,.md,.csv,.json,.xlsx,.xls,.docx,.pptx,.epub,.rtf,.yaml,.yml,.toml,.html,.xml,.log,.zip">
-            <textarea id="messageInput" rows="1" placeholder="How can I help you today?"></textarea>
-            <div class="composer-bar">
-              <div class="composer-left">
-                <button type="button" id="composerPlusBtn" class="plus-btn" title="Add context & tools">+</button>
-              </div>
-              <div class="composer-right">
-                <button type="button" id="composerStyleQuickBtn" class="style-pill">
-                  <span id="composerStyleQuickLabel">Normal</span>
-                </button>
-                <button type="submit" id="sendBtn" class="send-btn" title="Send">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-                </button>
-              </div>
+          <textarea id="messageInput" placeholder="Message Owlynn..." rows="1"></textarea>
+          <button class="icon-btn" id="attachFileBtn" title="Attach File">
+            <i data-lucide="paperclip"></i>
+          </button>
+          <button class="icon-btn" id="micBtn" title="Mic">
+            <i data-lucide="mic"></i>
+          </button>
+          <button class="send-btn" id="sendBtn" title="Send">
+            <i data-lucide="send"></i>
+          </button>
+        </div>
+
+        <div class="pane-resize-handle right"></div>
+      </div>
+
+      <!-- Workspace: project inspector + file list -->
+      <div id="workspacePanel" class="workspace-panel hidden">
+        <div id="workspaceDropZone" class="hidden workspace-drop-zone">
+          <span>Drop files to upload</span>
+        </div>
+        <div id="workspaceResizeHandle" class="workspace-resize-handle" aria-hidden="true"></div>
+        <div class="pane-header">
+          <span>Workspace</span>
+          <div class="pane-header-actions">
+            <button type="button" id="uploadWorkspaceBtn" class="pv-action-btn" title="Upload files">
+              <i data-lucide="upload"></i>
+            </button>
+            <button type="button" id="newFolderBtn" class="pv-action-btn" title="New folder">
+              <i data-lucide="folder-plus"></i>
+            </button>
+          </div>
+        </div>
+        <div id="workspaceInspector">
+          <div id="projectInspectorTitle" class="workspace-inspector-title">—</div>
+          <p id="projectInspectorInstructions">—</p>
+          <div class="workspace-usage-row">
+            <div class="workspace-usage-track">
+              <div id="projectInspectorUsageBar" class="workspace-usage-fill" style="width:0%"></div>
             </div>
-          </form>
+            <span id="projectInspectorUsage" class="workspace-usage-label">0%</span>
+          </div>
+          <p id="projectInspectorMeta">0 chats • 0 files</p>
+          <p id="projectInspectorStatus" class="workspace-inspector-status">—</p>
         </div>
+        <div id="workspaceBreadcrumbs"></div>
+        <div id="workspaceFilesList"></div>
+        <input type="file" id="workspaceFileInput" multiple class="hidden" />
+      </div>
+
+      <!-- Right: Knowledge Map -->
+      <div id="knowledgePanel">
+        <div class="pane-resize-handle left"></div>
+        <div class="pane-header">
+          <span>Knowledge Map</span>
+          <button id="collapseRightBtn">▶</button>
+        </div>
+        <div id="knowledgeEntries"><!-- KnowledgeMap renders here --></div>
+      </div>
+
+      <!-- Content Preview Panel (hidden by default) -->
+      <div id="contentPreviewPanel" class="hidden">
+        <div class="aurora-preview-toolbar" id="previewToolbar">
+          <!-- Toolbar buttons rendered by JS -->
+        </div>
+        <div id="previewContent" style="flex:1; overflow:auto; padding:1rem;"></div>
       </div>
     </div>
-
-    <!-- View: Chats list -->
-    <div id="view-chats" class="view">
-      <div class="view-page">
-        <div class="chats-page-header">
-          <h2>Chats</h2>
-          <div class="chats-search-bar">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-            <input id="chatsSearchInput" type="search" placeholder="Search your chats..." autocomplete="off">
-          </div>
-        </div>
-        <div class="chats-toolbar">
-          <div class="chats-toolbar-left" id="chatsCount"></div>
-          <div class="chats-toolbar-right">
-            <button id="chatsSelectBtn" class="btn-outline" style="font-size:0.8rem;padding:0.3rem 0.7rem">Select</button>
-          </div>
-        </div>
-        <div id="chatsBatchBar" class="chats-toolbar hidden" style="background:var(--surface);border-radius:var(--radius);padding:0.5rem 1rem;margin-bottom:0.5rem">
-          <div class="chats-toolbar-left"><span id="chatsSelectedCount">0</span> selected</div>
-          <div class="chats-toolbar-right">
-            <button id="chatsBatchMove" class="btn-outline" style="font-size:0.8rem;padding:0.3rem 0.7rem">Move to project</button>
-            <button id="chatsBatchDelete" class="btn-outline" style="font-size:0.8rem;padding:0.3rem 0.7rem;color:var(--danger);border-color:var(--danger)">Delete</button>
-            <button id="chatsBatchCancel" class="btn-outline" style="font-size:0.8rem;padding:0.3rem 0.7rem">Cancel</button>
-          </div>
-        </div>
-        <div id="chatsListContainer" class="list-container"></div>
-      </div>
-    </div>
-
-    <!-- View: Projects -->
-    <div id="view-projects" class="view">
-      <div class="view-page">
-        <div class="projects-header">
-          <h2>Projects</h2>
-          <button id="addProjectViewBtn" class="btn-accent">+ New project</button>
-        </div>
-        <div class="projects-search-bar">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          <input id="projectsSearchInput" type="search" placeholder="Search projects..." autocomplete="off">
-        </div>
-        <div id="projectsGridContainer" class="projects-grid"></div>
-        <!-- Hidden compat elements -->
-        <div id="projectsList" class="hidden"></div>
-        <div class="hidden">
-          <span id="projectInspectorTitle"></span>
-          <span id="projectInspectorInstructions"></span>
-          <span id="projectInspectorUsage"></span>
-          <span id="projectInspectorUsageBar"></span>
-          <span id="projectInspectorMeta"></span>
-          <span id="projectInspectorStatus"></span>
-          <div id="projectKnowledgeSection"></div>
-          <div id="projectFilesList"></div>
-        </div>
-      </div>
-    </div>
-
-    <!-- View: Project Detail (inside a project) -->
-    <div id="view-project-detail" class="view" style="flex-direction:row">
-      <div class="view-page" style="max-width:800px">
-        <button id="projectBackBtn" class="link-btn" style="margin-bottom:0.75rem;font-size:0.82rem">← All projects</button>
-        <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:0.25rem">
-          <h2 id="projectDetailName" style="font-size:1.5rem;font-weight:700"></h2>
-          <div style="display:flex;gap:0.25rem">
-            <button id="projectDetailMenu" class="icon-btn" title="More">···</button>
-            <button id="projectDetailPin" class="icon-btn" title="Pin">☆</button>
-          </div>
-        </div>
-        <p id="projectDetailDesc" style="font-size:0.85rem;color:var(--text-muted);margin-bottom:1.25rem"></p>
-
-        <!-- Composer -->
-        <div class="welcome-composer" id="projectComposer" style="margin-bottom:1.5rem">
-          <div id="projectComposerPreviews" class="attachment-previews hidden"></div>
-          <textarea id="projectInput" rows="2" placeholder="How can I help you today?"></textarea>
-          <div class="composer-bar">
-            <div class="composer-left">
-              <button type="button" class="icon-btn" onclick="document.getElementById('fileInput')?.click()">+</button>
-            </div>
-            <div class="composer-right">
-              <button type="button" id="projectStyleBtn" class="style-pill"><span>Normal</span></button>
-              <button type="button" id="projectSendBtn" class="send-btn">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <!-- Recent project chats -->
-        <div id="projectDetailChats" style="margin-bottom:2rem"></div>
-
-        <!-- Instructions section -->
-        <div class="card" style="margin-bottom:1rem">
-          <div style="display:flex;justify-content:space-between;align-items:center">
-            <span style="font-size:0.9rem;font-weight:600">Instructions</span>
-            <button id="projectEditInstructions" class="icon-btn" style="width:28px;height:28px;font-size:0.9rem" title="Edit">+</button>
-          </div>
-          <p id="projectDetailInstructions" style="font-size:0.82rem;color:var(--text-muted);margin-top:0.5rem;line-height:1.5"></p>
-        </div>
-
-        <!-- Files section with drag-drop -->
-        <div class="card" id="projectFilesCard">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem">
-            <span style="font-size:0.9rem;font-weight:600">Files</span>
-            <button id="projectUploadFile" class="icon-btn" style="width:28px;height:28px;font-size:0.9rem" title="Upload">+</button>
-          </div>
-          <div id="projectDetailFiles" class="project-files-grid"></div>
-          <div id="projectDropZone" class="project-dropzone">
-            Drop files here to upload
-          </div>
-        </div>
-      </div>
-      <!-- Right side: split file viewer -->
-      <div id="projectFileViewer" class="project-file-viewer hidden">
-        <div class="project-viewer-resize" id="projectViewerResize"></div>
-        <div class="project-viewer-header">
-          <span id="projectViewerTitle" style="font-weight:600;font-size:0.9rem;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
-          <button id="projectViewerClose" class="icon-btn" style="width:28px;height:28px">✕</button>
-        </div>
-        <div id="projectViewerContent" class="project-viewer-content"></div>
-      </div>
-    </div>
-
-    <!-- View: Customize -->
-    <div id="view-customize" class="view">
-      <div class="view-page">
-        <div class="view-header"><h2>Customize</h2></div>
-        <div class="tab-bar">
-          <button id="customizeSkillsTabBtn" class="tab-btn active">Skills & Tools</button>
-          <button id="customizeConnectorsTabBtn" class="tab-btn">Connectors</button>
-        </div>
-        <div id="customizeSkillsPanel" class="panel">
-          <div id="skillsListContainer" class="list-container"></div>
-        </div>
-        <div id="customizeConnectorsPanel" class="panel hidden">
-          <div id="connectorsListContainer" class="list-container"></div>
-          <button id="connectToolsBar" class="btn-outline">Connect more tools</button>
-        </div>
-      </div>
-    </div>
-  </main>
-
-  <!-- ─── Composer Menus (fixed position, shared between welcome & chat) ─── -->
-  <div id="composerPlusMenu" class="dropdown-menu hidden" role="menu">
-    <button type="button" id="composerMenuAttach" class="menu-item">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
-      Attach files
-    </button>
-    <button type="button" id="composerMenuWebSearch" class="menu-item">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
-      Web search <span id="composerWebSearchCheck" class="menu-check">✓</span>
-    </button>
-    <button type="button" id="composerMenuStyleBtn" class="menu-item">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-      Response style ›
-    </button>
-    <hr class="menu-divider">
-    <button type="button" id="composerMenuProject" class="menu-item">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-      Projects
-    </button>
-    <button type="button" id="composerMenuConnectors" class="menu-item" disabled>
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-      Connectors
-    </button>
-  </div>
-
-  <div id="composerStyleSubmenu" class="dropdown-menu hidden" role="menu">
-    <button class="menu-item composer-style-option active-style" data-style="normal">Normal</button>
-    <button class="menu-item composer-style-option" data-style="learning">Learning</button>
-    <button class="menu-item composer-style-option" data-style="concise">Concise</button>
-    <button class="menu-item composer-style-option" data-style="explanatory">Explanatory</button>
-    <button class="menu-item composer-style-option" data-style="formal">Formal</button>
   </div>
 
   <!-- ─── Settings Modal ─── -->
   <div id="settingsModal" class="modal hidden">
-    <div class="modal-backdrop" onclick="App.closeSettings()"></div>
-    <div class="modal-dialog modal-lg">
+    <div class="modal-backdrop" onclick="document.getElementById('settingsModal').classList.add('hidden')"></div>
+    <div class="modal-dialog modal-lg modal-tall">
       <div class="modal-header">
         <h2>Settings</h2>
-        <button id="closeSettingsBtn" class="icon-btn" onclick="App.closeSettings()">✕</button>
+        <button class="icon-btn" onclick="document.getElementById('settingsModal').classList.add('hidden')">
+          <i data-lucide="x"></i>
+        </button>
       </div>
-      <div class="settings-tabs">
-        <button class="settings-tab active" data-tab="profile">Profile</button>
-        <button class="settings-tab" data-tab="system">System</button>
-        <button class="settings-tab" data-tab="memory">Memory</button>
-        <button class="settings-tab" data-tab="advanced">Advanced</button>
+      <div class="modal-body" id="settingsBody">
+        <!-- Settings content rendered by JS -->
       </div>
-      <div class="modal-body">
-        <!-- Profile Tab -->
-        <div class="tab-content active" data-tab="profile">
-          <div class="form-grid">
-            <div class="form-field">
-              <label>Display Name</label>
-              <input id="profileName" type="text" placeholder="Your name">
-            </div>
-            <div class="form-field">
-              <label>Preferred Language</label>
-              <select id="profileLang">
-                <option value="en">English</option>
-                <option value="th">Thai</option>
-                <option value="ja">Japanese</option>
-                <option value="zh">Chinese</option>
-              </select>
-            </div>
-            <div class="form-field">
-              <label>Response Style</label>
-              <select id="profileStyle">
-                <option value="detailed">Detailed</option>
-                <option value="concise">Concise</option>
-                <option value="step_by_step">Step-by-step</option>
-              </select>
-            </div>
-            <div class="form-field">
-              <label>Small LLM URL</label>
-              <input id="profileSmallLlmUrl" type="text" value="http://127.0.0.1:1234/v1">
-            </div>
-            <div class="form-field">
-              <label>Small LLM Model</label>
-              <input id="profileSmallLlmModel" type="text" value="jackrong-qwen3.5-2b-claude-reasoning-abliterated-mxfp8-mlx">
-            </div>
-            <!-- Medium Models -->
-            <h4 style="margin-top:1rem">Medium Models (Swappable)</h4>
-            <div class="form-field">
-              <label>Default Model</label>
-              <input id="profileMediumDefault" type="text" value="qwen/qwen3.5-9b">
-            </div>
-            <div class="form-field">
-              <label>Vision Model</label>
-              <input id="profileMediumVision" type="text" value="zai-org/glm-4.6v-flash">
-            </div>
-            <div class="form-field">
-              <label>Long Context Model</label>
-              <input id="profileMediumLongctx" type="text" value="lfm2-8b-a1b">
-            </div>
-            <!-- Cloud (DeepSeek) -->
-            <h4 style="margin-top:1rem">Cloud (DeepSeek API)</h4>
-            <div class="form-field">
-              <label>DeepSeek API URL</label>
-              <input id="profileCloudUrl" type="text" value="https://api.deepseek.com/v1">
-            </div>
-            <div class="form-field">
-              <label>DeepSeek Model</label>
-              <input id="profileCloudModel" type="text" value="deepseek-chat">
-            </div>
-            <div class="form-field">
-              <label>API Key</label>
-              <input id="profileCloudApiKey" type="password" placeholder="sk-...">
-            </div>
-          </div>
-          <div class="form-field" style="margin-top:1rem">
-            <label>Agent Name</label>
-            <input id="personaName" type="text" placeholder="Owlynn">
-          </div>
-          <div class="form-field">
-            <label>Agent Tone</label>
-            <input id="personaTone" type="text" placeholder="friendly, clear, professional">
-          </div>
-          <button id="saveProfileBtn" class="btn-accent" style="margin-top:1rem">Save Profile</button>
-        </div>
+    </div>
+  </div>
 
-        <!-- System Tab -->
-        <div class="tab-content" data-tab="system">
-          <div class="form-field">
-            <div class="field-header">
-              <label>System Prompt</label>
-              <button id="resetSystemPromptBtn" class="link-btn">Reset</button>
-            </div>
-            <textarea id="systemPromptInput" rows="8" placeholder="You are a helpful AI assistant..."></textarea>
-          </div>
-          <div class="form-field">
-            <label>Custom Instructions</label>
-            <textarea id="customInstructionsInput" rows="6" placeholder="Additional guidelines..."></textarea>
-          </div>
-          <button id="saveSystemPromptBtn" class="btn-accent">Save System Settings</button>
-        </div>
-
-        <!-- Memory Tab -->
-        <div class="tab-content" data-tab="memory">
-          <div class="card">
-            <div class="toggle-row">
-              <div><strong>Short-term Memory</strong><br><small>Current conversation context</small></div>
-              <label class="toggle"><input type="checkbox" id="shortTermMemoryToggle" checked><span class="toggle-slider"></span></label>
-            </div>
-            <div class="toggle-row">
-              <div><strong>Long-term Memory</strong><br><small>Facts across sessions</small></div>
-              <label class="toggle"><input type="checkbox" id="longTermMemoryToggle" checked><span class="toggle-slider"></span></label>
-            </div>
-          </div>
-          <div class="card">
-            <h4>Tracked Topics</h4>
-            <div id="trackedTopics" class="tag-cloud"><span class="empty-hint">Loading...</span></div>
-          </div>
-          <div class="card">
-            <h4>Interests</h4>
-            <div id="detectedInterests" class="tag-cloud"><span class="empty-hint">Loading...</span></div>
-          </div>
-          <div class="card">
-            <h4>Recent Conversations</h4>
-            <div id="recentConversations" class="mini-list"><span class="empty-hint">Loading...</span></div>
-          </div>
-          <div class="form-field">
-            <label>Add Memory</label>
-            <div class="input-group">
-              <input id="newMemoryInput" type="text" placeholder="e.g. User prefers Python">
-              <button id="addMemoryBtn" class="btn-outline">Add</button>
-            </div>
-          </div>
-          <div id="memoriesList" class="mini-list card"></div>
-            <h4 style="margin-top:1rem">Short-Term Memory Backend</h4>
-            <div class="form-field">
-              <label>Redis URL</label>
-              <input id="redisUrlInput" type="text" value="redis://localhost:6379">
-            </div>
-        </div>
-
-        <!-- Advanced Tab -->
-        <div class="tab-content" data-tab="advanced">
-          <div class="card">
-            <h4>Inference Parameters</h4>
-            <div class="slider-grid">
-              <div class="slider-field">
-                <div class="slider-header"><label>Temperature</label><span id="temperatureValue">0.7</span></div>
-                <input id="temperatureSlider" type="range" min="0" max="2" step="0.1" value="0.7">
-              </div>
-              <div class="slider-field">
-                <div class="slider-header"><label>Top-p</label><span id="topPValue">0.9</span></div>
-                <input id="topPSlider" type="range" min="0" max="1" step="0.05" value="0.9">
-              </div>
-              <div class="slider-field">
-                <div class="slider-header"><label>Max Tokens</label><span id="maxTokensValue">2048</span></div>
-                <input id="maxTokensSlider" type="range" min="256" max="8192" step="256" value="2048">
-              </div>
-              <div class="slider-field">
-                <div class="slider-header"><label>Top-k</label><span id="topKValue">40</span></div>
-                <input id="topKSlider" type="range" min="0" max="100" step="5" value="40">
-              </div>
-            </div>
-          </div>
-          <div class="card">
-            <h4>Behavior</h4>
-            <label class="checkbox-row"><input type="checkbox" id="streamingToggle" checked> Streaming responses</label>
-            <label class="checkbox-row"><input type="checkbox" id="thinkingToggle"> Show thinking</label>
-            <label class="checkbox-row"><input type="checkbox" id="toolVisibilityToggle" checked> Show tool execution</label>
-            <label class="checkbox-row"><input type="checkbox" id="lmStudioFoldToggle" checked> LM Studio fold system prompt</label>
-            <h4 style="margin-top:1rem">Routing & Cloud</h4>
-            <label class="checkbox-row"><input type="checkbox" id="cloudEscalationToggle" checked> Cloud escalation enabled</label>
-            <label class="checkbox-row"><input type="checkbox" id="cloudAnonymizationToggle" checked> Cloud anonymization enabled</label>
-            <label class="checkbox-row"><input type="checkbox" id="routerHitlToggle" checked> Router clarification enabled</label>
-            <div class="form-field">
-              <label>Clarification threshold: <span id="thresholdValue">0.6</span></label>
-              <input type="range" id="routerThresholdSlider" min="0" max="1" step="0.05" value="0.6">
-            </div>
-            <div class="form-field">
-              <label>Custom Sensitive Terms (comma-separated)</label>
-              <textarea id="customSensitiveTerms" rows="2" placeholder="project-name, secret-code"></textarea>
-            </div>
-          </div>
-          <button id="saveAdvancedBtn" class="btn-accent">Save Advanced Settings</button>
-        </div>
+  <!-- ─── Spotlight Search Modal ─── -->
+  <div id="spotlightModal" class="modal hidden" style="align-items:flex-start;">
+    <div class="modal-backdrop" onclick="document.getElementById('spotlightModal').classList.add('hidden')"></div>
+    <div class="spotlight-panel">
+      <div class="spotlight-input-row">
+        <i data-lucide="search"></i>
+        <input type="text" id="spotlightInput" placeholder="Search or type a command..." autocomplete="off">
       </div>
-      <div class="modal-footer">
-        <button id="closeSettingsFooterBtn" class="btn-outline" onclick="App.closeSettings()">Done</button>
-      </div>
+      <div class="spotlight-results" id="spotlightResults"></div>
     </div>
   </div>
 
   <!-- ─── File Viewer Modal ─── -->
   <div id="fileViewerModal" class="modal hidden">
-    <div class="modal-backdrop" onclick="App.closeFileViewer()"></div>
+    <div class="modal-backdrop" onclick="document.getElementById('fileViewerModal').classList.add('hidden')"></div>
     <div class="modal-dialog modal-lg modal-tall">
       <div class="modal-header">
-        <h3 id="fileViewerTitle">File</h3>
-        <div class="modal-header-actions">
-          <button id="downloadFileBtn" class="icon-btn" title="Download">⬇</button>
-          <button id="closeFileViewerBtn" class="icon-btn" onclick="App.closeFileViewer()">✕</button>
-        </div>
+        <h3 id="fileViewerTitle">File Viewer</h3>
+        <button class="icon-btn" onclick="document.getElementById('fileViewerModal').classList.add('hidden')">
+          <i data-lucide="x"></i>
+        </button>
       </div>
-      <div id="fileViewerContent" class="modal-body file-viewer-body"></div>
+      <div class="modal-body file-viewer-body" id="fileViewerBody"></div>
     </div>
   </div>
 
-  <!-- ─── Confirm Modal ─── -->
+  <!-- ─── Security Approval Modal ─── -->
+  <div id="securityApprovalModal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-dialog modal-sm">
+      <h3 style="margin-bottom:0.75rem;">Security Approval Required</h3>
+      <p id="securityApprovalText" style="font-size:0.9rem; color:var(--text-muted); margin-bottom:1rem;"></p>
+      <div id="securityApprovalArgs" class="tool-io" style="margin-bottom:1rem;"></div>
+      <div class="modal-actions">
+        <button class="btn-danger" id="securityDenyBtn">Deny</button>
+        <button class="btn-accent" id="securityApproveBtn">Approve</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── Custom Confirm Modal ─── -->
   <div id="customConfirmModal" class="modal hidden">
     <div class="modal-backdrop"></div>
     <div class="modal-dialog modal-sm">
-      <h3 id="confirmModalTitle">Confirm</h3>
-      <p id="confirmModalMessage">Are you sure?</p>
+      <h3 id="confirmModalTitle" style="margin-bottom:0.75rem;">Confirm</h3>
+      <p id="confirmModalMessage" style="font-size:0.9rem; color:var(--text-muted); margin-bottom:1.25rem; white-space:pre-wrap;"></p>
       <div class="modal-actions">
-        <button id="cancelConfirmBtn" class="btn-outline">Cancel</button>
-        <button id="confirmConfirmBtn" class="btn-danger">Delete</button>
+        <button class="btn-outline" id="cancelConfirmBtn">Cancel</button>
+        <button class="btn-accent" id="confirmConfirmBtn">Confirm</button>
       </div>
     </div>
   </div>
 
-  <!-- ─── Input Modal ─── -->
+  <!-- ─── Custom Input Modal ─── -->
   <div id="customInputModal" class="modal hidden">
     <div class="modal-backdrop"></div>
     <div class="modal-dialog modal-sm">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem;">
         <h3 id="customInputTitle">Input</h3>
-        <button id="closeCustomInputBtn" class="icon-btn">✕</button>
+        <button class="icon-btn" id="closeCustomInputBtn">
+          <i data-lucide="x"></i>
+        </button>
       </div>
       <div class="form-field">
-        <label id="customInputLabel">Value</label>
-        <input id="customInputField" type="text" placeholder="Enter value">
+        <label id="customInputLabel" style="font-size:0.8rem; color:var(--text-muted); margin-bottom:0.35rem; display:block;"></label>
+        <input type="text" id="customInputField" class="modal-input" placeholder="" style="width:100%; padding:0.5rem 0.75rem; border-radius:0.5rem; border:1px solid var(--border); background:var(--surface); color:var(--text); font-size:0.9rem;">
       </div>
-      <div class="modal-actions">
-        <button id="cancelCustomInputBtn" class="btn-outline">Cancel</button>
-        <button id="confirmCustomInputBtn" class="btn-accent">Confirm</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- ─── Rename Modal ─── -->
-  <div id="renameModal" class="modal hidden">
-    <div class="modal-backdrop"></div>
-    <div class="modal-dialog modal-sm">
-      <h3 id="renameModalTitle">Rename</h3>
-      <div class="form-field">
-        <label id="renameModalLabel">New Name</label>
-        <input id="newFilenameInput" type="text" placeholder="Enter name...">
-      </div>
-      <div class="modal-actions">
-        <button id="cancelRenameBtn" class="btn-outline">Cancel</button>
-        <button id="confirmRenameBtn" class="btn-accent">Confirm</button>
+      <div class="modal-actions" style="margin-top:1rem;">
+        <button class="btn-outline" id="cancelCustomInputBtn">Cancel</button>
+        <button class="btn-accent" id="confirmCustomInputBtn">OK</button>
       </div>
     </div>
   </div>
 
-  <!-- ─── Spotlight Search ─── -->
-  <div id="searchModal" class="modal hidden" style="align-items:flex-start">
-    <div class="modal-backdrop" onclick="App.closeSearch()"></div>
-    <div class="spotlight-panel">
-      <div class="spotlight-input-row">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-        <input id="popupSearchInput" type="search" placeholder="Search chats and projects…" autocomplete="off" spellcheck="false">
-      </div>
-      <div id="spotlightResults" class="spotlight-results">
-        <p class="empty-hint">Type to search…</p>
-      </div>
+  <!-- Drag Overlay -->
+  <div id="dragOverlay" class="drag-overlay hidden">
+    <div class="drag-overlay-inner">
+      <i data-lucide="upload"></i>
+      <p>Drop files here</p>
+      <span>Attach to your message</span>
     </div>
   </div>
 
-  <!-- Hidden backward-compat elements for script.js -->
-  <div class="hidden">
-    <span id="agentNameDisplay"></span>
-    <span id="agentRoleDisplay"></span>
-    <span id="memoriesCount"></span>
-    <span id="mobileConnectionDot"></span>
-    <span id="sessionId"></span>
-    <button id="addProjectBtn"></button>
-    <button id="openSettingsBtn" onclick="App.openSettings()"></button>
-    <button id="attachBtn"></button>
-    <div id="welcomeRecentList"></div>
-    <button id="welcomeOpenChatsBtn"></button>
-    <button id="modeFastBtn"></button>
-    <button id="modeReasoningBtn"></button>
-    <button id="savePersonaBtn"></button>
-    <button id="composerMenuGithub"></button>
-    <input id="profileLlmUrl" type="hidden">
-    <input id="profileLlmModel" type="hidden">
-  </div>
+  <!-- Hidden file input -->
+  <input type="file" id="fileInput" multiple style="display:none">
 
-  <!-- DOMPurify for XSS protection (local) -->
-  <script src="vendor/purify.min.js"></script>
-  <!-- Marked for markdown rendering (local) -->
+  <!-- Vendor Scripts -->
+  <script src="vendor/tailwind.js"></script>
   <script src="vendor/marked.min.js"></script>
-  <!-- Mammoth for docx rendering (local) -->
+  <script src="vendor/purify.min.js"></script>
   <script src="vendor/mammoth.min.js"></script>
+  <script src="vendor/lucide.min.js"></script>
+  <script src="vendor/codemirror-loader.js"></script>
+
+  <!-- Module Scripts -->
+  <script src="modules/workspace-state.js"></script>
+  <script src="modules/explorer.js"></script>
+  <script src="modules/context-health-bar.js"></script>
+  <script src="modules/stage.js"></script>
+  <script src="modules/tool-dock.js"></script>
+  <script src="modules/command-bar.js"></script>
+  <script src="modules/orchestrator-panel.js"></script>
+  <script src="modules/knowledge-map.js"></script>
+
+  <!-- App Script -->
   <script src="script.js"></script>
+
+  <!-- Initialize Aurora Layout + Lucide Icons -->
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      // Detect Tauri — enable transparent vibrancy mode
+      const isTauri = !!(window.__TAURI__ || location.protocol === 'tauri:');
+      if (isTauri) {
+        document.body.classList.add('tauri-vibrancy');
+        const titleBar = document.getElementById('titleBar');
+        if (titleBar) {
+          titleBar.addEventListener('mousedown', async (e) => {
+            if (e.target.closest('button, input, a, [data-no-drag]')) return;
+            if (e.button !== 0) return;
+            try {
+              if (window.__TAURI__?.invoke) {
+                await window.__TAURI__.invoke('tauri', { __tauriModule: 'Window', message: { cmd: 'manage', data: { cmd: { type: 'startDragging' } } } });
+              } else if (window.__TAURI__?.window?.appWindow?.startDragging) {
+                await window.__TAURI__.window.appWindow.startDragging();
+              }
+            } catch (_) {}
+          });
+        }
+      }
+      if (window.lucide) lucide.createIcons();
+      if (typeof initAuroraLayout === 'function') initAuroraLayout();
+    });
+  </script>
 </body>
 </html>
