@@ -6,7 +6,7 @@
 
 - Python 3.12+
 - Node.js 18+ (for frontend tests)
-- Docker/Podman (for ChromaDB, SearXNG, Redis)
+- Docker/Podman (for Qdrant, SearXNG, Redis)
 - LM Studio with models loaded on port 1234
 - Rust & Cargo (only if building the Tauri desktop app)
 
@@ -28,17 +28,28 @@ cp .env.example .env
 docker-compose up -d
 
 # Run the backend
-python -m uvicorn src.api.server:app --host 0.0.0.0 --port 8000 --reload
+python -m uvicorn src.api.server:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-### Frontend Setup
+### Frontend Setup (v2 active)
 
 ```bash
-cd frontend
+cd frontend-v2
 npm install
 ```
 
-The frontend is served by the FastAPI backend at `http://localhost:8000`. No separate dev server is needed for normal development.
+The frontend is served by the FastAPI backend at `http://127.0.0.1:8000`. For development, you can also run the Vite dev server separately:
+
+```bash
+cd frontend-v2
+npm run dev
+```
+
+The Vite dev server runs on `http://127.0.0.1:5173` with API/WebSocket proxied to the backend.
+
+### Legacy Frontend (v1 — end of life)
+
+The old `frontend/` directory contains the original HTML/CSS/JS frontend. It is no longer actively developed.
 
 ## Code Style
 
@@ -86,16 +97,16 @@ pytest tests/ --cov=src --cov-report=term-missing
 ### Frontend Tests
 
 ```bash
-cd frontend
+cd frontend-v2
 npx vitest run
 ```
 
-- Property-based tests use `fast-check` with `vitest`.
-- Test files go in `frontend/tests/` with `.test.js` suffix.
+- Component tests use `@testing-library/react` with `vitest` + `jsdom`.
+- Test files go in `frontend-v2/src/components/__tests__/` with `.test.tsx` suffix.
 
 ### Before Submitting
 
-1. All existing tests pass: `pytest tests/ -v` and `cd frontend && npx vitest run`
+1. All existing tests pass: `pytest tests/ -v -m "not network"` and `cd frontend-v2 && npx vitest run`
 2. New features include tests.
 3. No lint errors in modified files.
 

@@ -11,14 +11,15 @@ Owlynn is a desktop AI assistant that keeps your data local. It uses a stateful 
 | Layer | Technology |
 |-------|-----------|
 | Backend | FastAPI + LangGraph + Python 3.12+ |
-| Frontend | Tauri desktop app (HTML/CSS/JS, vendored deps) |
+| Frontend | React 19 + TypeScript (Vite 8) + Zustand 5, served via Tauri desktop shell |
 | Small LLM | Gemma 4 E2B Heretic Uncensored (MLX, routing) |
 | Medium LLM | LFM2 8B A1B Absolute Heresy MPOA (MLX, reasoning + tool calling) |
 | Cloud LLM | DeepSeek API (optional escalation) |
 | Memory | Mem0 + Qdrant + JSON files |
-| Checkpointing | Redis (falls back to in-memory) |
-| Search | SearXNG (self-hosted metasearch) |
-| Testing | pytest + hypothesis (backend), vitest + fast-check (frontend) |
+| Checkpointing | Redis (falls back to in-memory `MemorySaver`) |
+| Search | Multi-tier: SearXNG (self-hosted) → Brave/Serper/Tavily → DuckDuckGo → Playwright |
+| Testing | pytest + hypothesis (backend), vitest + @testing-library/react (frontend) |
+| Desktop | Tauri v1 (Rust, macOS vibrancy) |
 
 ## Architecture
 
@@ -84,7 +85,18 @@ src/tools/           Tool implementations (20 tools)
 src/config/          Configuration
   └── settings.py      Global settings + M4 optimization config
 
-frontend/            Tauri desktop app
+frontend-v2/          React 19 + TypeScript frontend (active)
+  ├── src/
+  │   ├── components/    Composer, OrchestrationPanel, SafeModePanel,
+  │   │                   ScreenAssistPanel, ToolExecutionPanel,
+  │   │                   ActionProposalQueue, LiveTalkControls,
+  │   │                   ProjectKnowledgePanel, AppShell
+  │   ├── state/         Zustand store (useAppStore)
+  │   ├── types/         WebSocket protocol type definitions
+  │   └── lib/           tauriBridge, wsClient
+  └── package.json
+
+frontend/             Legacy v1 frontend (HTML/CSS/JS, vendored deps)
   ├── index.html       Main HTML shell
   ├── script.js        StateManager + LeftPane + app init
   ├── style.css        Styles
@@ -127,12 +139,11 @@ cp .env.example .env
 # 4. Start services + backend + desktop app
 ./start.sh
 
-# Or start just the backend:
-# docker-compose up -d   # Qdrant + SearXNG + Redis
-# python -m uvicorn src.api.server:app --host 0.0.0.0 --port 8000
+# Run just the backend (without frontend):
+# uvicorn src.api.server:app --host 127.0.0.1 --port 8000
 ```
 
-The app opens at `http://localhost:8000` or as a Tauri desktop window.
+The app opens at `http://127.0.0.1:8000` or as a Tauri desktop window.
 
 ## Configuration
 
@@ -142,7 +153,7 @@ The app opens at `http://localhost:8000` or as a Tauri desktop window.
 |----------|---------|-------------|
 | `REDIS_URL` | `redis://localhost:6379` | Redis for LangGraph checkpointing |
 | `QDRANT_HOST` | `localhost` | Qdrant host for vector memory |
-| `QDRANT_PORT` | `8100` | Qdrant port |
+| `QDRANT_PORT` | `6333` | Qdrant port |
 | `SEARXNG_URL` | _(empty)_ | SearXNG URL (e.g. `http://localhost:8888`) |
 | `DEEPSEEK_API_KEY` | _(empty)_ | Optional DeepSeek API key for cloud tier |
 | `LINEAR_API_KEY` | _(empty)_ | Optional Linear API key (if your Linear MCP auth flow requires it) |
@@ -245,10 +256,10 @@ pytest tests/test_crud_properties.py -v
 pytest tests/ -v --hypothesis-show-statistics
 ```
 
-### Frontend (vitest + fast-check)
+### Frontend (vitest + @testing-library/react)
 
 ```bash
-cd frontend
+cd frontend-v2
 npm install
 npx vitest run
 ```

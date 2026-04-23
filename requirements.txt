@@ -1,29 +1,43 @@
-langgraph
-langchain
-langchain-community
-langchain-openai
-mem0ai
-chromadb
-mcp
-fastapi
-uvicorn
-websockets
-watchdog
-pandas
-openpyxl
-python-docx
-python-pptx
-tabulate
+# Core agent orchestration
+langgraph>=1.1.0
+langchain>=0.3
+langchain-community>=0.3
+langchain-openai>=1.0
+mcp>=1.0
+
+# Memory
+mem0ai>=1.0
+
+# API server
+fastapi>=0.115
+uvicorn[standard]>=0.34
+websockets>=12.0
+
+# File monitoring
+watchdog>=4.0
+
+# File format processing
+pandas>=2.0
+openpyxl>=3.0
+python-docx>=1.0
+python-pptx>=0.6
+tabulate>=0.9
+PyMuPDF>=1.23
+PyYAML>=6.0
+tomli>=2.0
+tomli_w>=1.0
+
 # Browser and web tools
 duckduckgo-search>=6.0
-playwright>=1.40.0
-beautifulsoup4>=4.12.0
-httpx>=0.24.0
-curl_cffi>=0.7.1
-# File format processing
-PyYAML>=6.0
-tomli>=2.0.0
-tomli_w>=1.0.0
-pymupdf>=1.23.0
+playwright>=1.40
+beautifulsoup4>=4.12
+httpx>=0.24
+curl_cffi>=0.7
+
 # Redis-backed LangGraph checkpointer
-langgraph-checkpoint-redis
+langgraph-checkpoint-redis>=0.3.6
+
+# Additional dependencies required at runtime
+numpy>=1.26
+Pillow>=10.0
+lxml>=5.0

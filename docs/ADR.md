@@ -4,20 +4,25 @@ This log records the significant architectural decisions for the Owlynn project,
 following the [ADR pattern](https://adr.github.io/). Each entry captures the context,
 decision, and consequences of a key design choice.
 
-## ADR-0001: Tauri v2 as Desktop Shell
+## ADR-0001: Tauri as Desktop Shell
 
 **Date:** 2026-04-23
+
+**Status:** Implemented with Tauri v1; v2 migration tracked for future.
 
 **Context:** Owlynn needed a native desktop shell to support local-first operation with
 screen capture, push-to-talk, and security controls. Options included Electron, Tauri v1/v2,
 and bare Python GUI frameworks.
 
-**Decision:** Tauri v2 with React + TypeScript frontend.
+**Decision:** Tauri v1 with React + TypeScript frontend, using macOS native vibrancy.
 
 **Consequences:**
 - Native window management and OS-level permissions (screen capture, mic) via Tauri commands.
 - Rust backend for security-critical paths, separate from Python agent.
 - Smaller binary size compared to Electron (~5MB vs ~100MB).
+- Uses Tauri v1 (stable, mature ecosystem) rather than v2 (newer API surface). v2 migration
+  is deferred — it would require rewriting `tauri.conf.json` format, command registration,
+  and permission model, with no immediate benefit for the current feature set.
 - Requires Tauri permission audit before production release.
 
 ---
@@ -84,7 +89,7 @@ with JSON event framing.
 **Context:** The assistant needs persistent cross-session memory with semantic search.
 Options included Mem0 with FAISS, ChromaDB, or Qdrant.
 
-**Decision:** Mem0 with local Qdrant on port 8100, LM Studio embeddings
+**Decision:** Mem0 with local Qdrant on port 6333, LM Studio embeddings
 (`nomic-embed-text-v1.5`).
 
 **Consequences:**

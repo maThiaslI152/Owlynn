@@ -7,8 +7,11 @@ keyword-matching lookup tool. No external DB or model downloads required.
 
 import json
 import re
+import logging
 from pathlib import Path
 from langchain_core.tools import tool
+
+logger = logging.getLogger(__name__)
 
 _GLOSSARY_PATH = Path(__file__).parent / "glossaries" / "tech_thai.json"
 
@@ -19,11 +22,11 @@ def _load_glossary() -> list[dict]:
             data = json.load(f)
         return data.get("terms", [])
     except Exception as e:
-        print(f"[Thai Glossary] Failed to load glossary: {e}")
+        logger.warning("Failed to load Thai glossary: %s", e)
         return []
 
 _GLOSSARY = _load_glossary()
-print(f"[Thai Glossary] Loaded {len(_GLOSSARY)} terms.")
+logger.info("Loaded %s Thai glossary terms.", len(_GLOSSARY))
 
 
 @tool

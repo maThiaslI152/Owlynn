@@ -38,6 +38,9 @@ from src.api.file_processor import start_watcher
 from src.tools.workspace_context import reset_active_project, set_active_project_for_run
 
 from contextlib import asynccontextmanager
+import logging
+
+logger = logging.getLogger(__name__)
 
 connected_websockets = set()
 
@@ -46,7 +49,7 @@ def notify_file_processed(filename, status="processed"):
     import asyncio
     loop = getattr(app.state, "loop", None)
     if not loop:
-        print("[Watcher] Loop not preserved, cannot notify websocket clients.")
+        logger.warning("Loop not preserved, cannot notify websocket clients.")
         return
         
     for ws in list(connected_websockets):
@@ -54,10 +57,14 @@ def notify_file_processed(filename, status="processed"):
             coro = ws.send_json({"type": "file_status", "name": filename, "status": status})
             asyncio.run_coroutine_threadsafe(coro, loop)
         except Exception as e:
-            print(f"[Watcher] Failed to send ws notification: {e}")
+            logger.warning("Failed to send ws notification: %s", e)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Initialize centralized logging
+    from src.config.logging_config import setup_logging
+    setup_logging()
+    
     # Preserve loop for async dispatchs from sync threads
     app.state.loop = asyncio.get_running_loop()
     
@@ -69,7 +76,7 @@ async def lifespan(app: FastAPI):
     try:
         app.state.file_watcher = start_watcher(WORKSPACE_DIR, on_processed_callback=notify_file_processed)
     except Exception as e:
-        print(f"[Lifespan] Failed to start file watcher: {e}")
+        logger.warning("Failed to start file watcher: %s", e)
         app.state.file_watcher = None
         
     yield
@@ -806,14 +813,13 @@ async def _auto_index_project_file(project_id: str, filename: str, filepath: str
         
         if text and len(text.strip()) > 50:
             await project_manager.add_knowledge(project_id, filename, text.strip())
-            print(f"[Project] Auto-indexed {filename} into project {project_id} knowledge base")
+            logger.info("Auto-indexed %s into project %s knowledge base", filename, project_id)
         else:
-            print(f"[Project] Skipped indexing {filename} — no extractable text")
+            logger.info("Skipped indexing %s — no extractable text", filename)
     except Exception as e:
-        print(f"[Project] Failed to auto-index {filename}: {e}")
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
+        logger.error("Failed to auto-index %s: %s", filename, e)
 
+    return {"status": "ok"}
 @app.post("/api/folders")
 async def api_create_folder(body: dict):
     """Creates a new directory in the workspace."""
@@ -897,7 +903,7 @@ async def api_get_history(thread_id: str):
         messages = state.values.get("messages", [])
         return [serialize_message(m) for m in messages]
     except Exception as e:
-        print(f"Failed to fetch history: {e}")
+        logger.warning("Failed to fetch history: %s", e)
         return []
 
 
@@ -1109,7 +1115,7 @@ class GraphSession:
             self.is_running = False
             # Final status update
             done_msg = {"type": "status", "content": "idle"}
-            print(f"[WS Debug] GraphSession._execute for thread {self.thread_id} FINISHED. Putting done_msg.")
+            logger.debug("GraphSession._execute for thread %s FINISHED. Putting done_msg.", self.thread_id)
             self.event_buffer.append(done_msg)
             for q in list(self.listeners):
                 await q.put(done_msg)
@@ -1157,7 +1163,7 @@ async def websocket_endpoint(websocket: WebSocket, thread_id: str):
                 
                     # Debug print
                     if kind in ["on_chain_start", "on_chain_end"]:
-                        print(f"[WS Debug] Event={kind} | Node={node}")
+                        logger.debug("Event=%s | Node=%s", kind, node)
 
                     if kind == "on_chain_start" and (node in {"tool_action", "tools"} or metadata.get("langgraph_step") == "tools"):
                         for tool_call_id, tc in list(pending_tool_calls.items()):
@@ -1286,7 +1292,7 @@ async def websocket_endpoint(websocket: WebSocket, thread_id: str):
                                         aw_msg["model_used"] = _node_model_used
                                     if _node_token_usage:
                                         aw_msg["token_usage"] = _node_token_usage
-                                    await websocket.send_json({"type": "message", "message": aw_msg})
+                                    await websocket.send_json({"type": "assistant.message", "message": aw_msg})
                                     for tc in tc_list:
                                         tool_call_id = str(tc.get("id") or tc.get("tool_call_id") or f"pending-{len(pending_tool_calls)+1}")
                                         tool_name = str(tc.get("name") or "unknown_tool")
@@ -1303,7 +1309,7 @@ async def websocket_endpoint(websocket: WebSocket, thread_id: str):
                                         final_msg["model_used"] = _node_model_used
                                     if _node_token_usage:
                                         final_msg["token_usage"] = _node_token_usage
-                                    await websocket.send_json({"type": "message", "message": final_msg})
+                                    await websocket.send_json({"type": "assistant.message", "message": final_msg})
                         elif node in {"tool_action", "tools"} or metadata.get("langgraph_step") == "tools":
                             if isinstance(output, dict) and "messages" in output:
                                 for msg in output["messages"]:
@@ -1329,18 +1335,16 @@ async def websocket_endpoint(websocket: WebSocket, thread_id: str):
                                             }
                                         )
                                     else:
-                                        await websocket.send_json({"type": "message", "message": serialize_message(msg)})
+                                        await websocket.send_json({"type": "assistant.message", "message": serialize_message(msg)})
                 else:
                     # Our custom events (status, error, etc)
-                    print(f"[WS Debug] Custom Event: {event}")
+                    logger.debug("Custom Event: %s", event)
                     await websocket.send_json(event)
         except WebSocketDisconnect:
-            print("[WS Debug] Forwarder disconnected")
+            logger.debug("Forwarder disconnected")
             pass
         except Exception as e:
-            import traceback
-            print(f"Error in event forwarder: {e}")
-            traceback.print_exc()
+            logger.error("Error in event forwarder: %s", e)
         finally:
             session.remove_listener(q)
             if not session.is_active() and thread_id in sessions:
@@ -1416,14 +1420,14 @@ async def websocket_endpoint(websocket: WebSocket, thread_id: str):
                         safe_name = urllib.parse.unquote(name).lstrip("/")
                         filepath = os.path.abspath(os.path.join(base_dir, safe_name))
                         if not filepath.startswith(os.path.abspath(base_dir)):
-                             print(f"[Workspace] Access denied for file {name} (outside workspace)")
+                             logger.warning("Access denied for file %s (outside workspace)", name)
                              continue
                              
                         with open(filepath, "wb") as file_out:
                             file_out.write(raw_bytes)
-                        print(f"[Workspace] Saved file to {filepath}")
+                        logger.info("Saved file to %s", filepath)
                     except Exception as e:
-                        print(f"[Workspace] Failed to save file {name}: {e}")
+                        logger.error("Failed to save file %s: %s", name, e)
 
             message_content = await build_message_content(user_input, files)
             if not message_content:
@@ -1442,7 +1446,7 @@ async def websocket_endpoint(websocket: WebSocket, thread_id: str):
             )
 
     except WebSocketDisconnect:
-        print(f"Client disconnected from thread: {thread_id}")
+        logger.info("Client disconnected from thread: %s", thread_id)
     finally:
         # We don't cancel the session task here! It continues in background.
         connected_websockets.discard(websocket) # Remove from active list
@@ -1490,7 +1494,7 @@ async def build_message_content(text: str, files: list):
             })
         
         elif mime == "application/pdf" or name.lower().endswith(".pdf"):
-            print(f"[PDF] Uploaded '{name}'. Extracting text for chat context.")
+            logger.info("Uploaded '%s'. Extracting text for chat context.", name)
             # extract_pdf_text defined below — called after module load
             pdf_text = await asyncio.to_thread(extract_pdf_text, raw_bytes)
             pdf_text = (pdf_text or "").strip()
@@ -1514,7 +1518,7 @@ async def build_message_content(text: str, files: list):
 
         else:
             # Text / code file
-            print(f"[File] Uploaded '{name}'. Adding workspace reference.")
+            logger.info("Uploaded '%s'. Adding workspace reference.", name)
             text_injections.append(
                 f"[Workspace file `{name}` saved. Invoke read_workspace_file as a tool with that path if you need contents — "
                 f"do not answer with only a suggestion to use the tool.]"
@@ -1547,7 +1551,7 @@ def extract_pdf_text(raw_bytes: bytes) -> str:
             pages_text.append(page.get_text())
         return "\n\n".join(pages_text)
     except Exception as e:
-        print(f"[PDF] PyMuPDF text extraction failed: {e}")
+        logger.error("PyMuPDF text extraction failed: %s", e)
         return ""
 
 
@@ -1596,7 +1600,7 @@ def render_pdf_as_composite(raw_bytes: bytes, max_pages: int = 10) -> str | None
             new_h = max(PATCH_SIZE, (new_h // PATCH_SIZE) * PATCH_SIZE)
             img = img.resize((PAGE_WIDTH, new_h), Image.LANCZOS)
             page_imgs.append(img)
-            print(f"[PDF] Rendered page {i+1} as {PAGE_WIDTH}x{new_h}")
+            logger.debug("Rendered page %s as %sx%s", i+1, PAGE_WIDTH, new_h)
         
         if not page_imgs:
             return None
@@ -1620,11 +1624,11 @@ def render_pdf_as_composite(raw_bytes: bytes, max_pages: int = 10) -> str | None
         buf = BytesIO()
         composite.save(buf, format="JPEG", quality=85)
         b64 = base64.b64encode(buf.getvalue()).decode()
-        print(f"[PDF] Composite image: {PAGE_WIDTH}x{total_h} ({len(page_imgs)} pages)")
+        logger.debug("Composite image: %sx%s (%s pages)", PAGE_WIDTH, total_h, len(page_imgs))
         return b64
         
     except Exception as e:
-        print(f"[PDF] Composite rendering failed: {e}")
+        logger.error("Composite rendering failed: %s", e)
         return None
 
 

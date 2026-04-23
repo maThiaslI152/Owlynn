@@ -11,11 +11,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Mem0 implicitly initializes its internal default OpenAI client during setup,
-# so we provide a dummy key to prevent `api_key` initialization errors,
-# but we disable its automatic LLM calls below using `infer=False`.
-os.environ.setdefault("OPENAI_API_KEY", "sk-dummy-key")
-
 from mem0 import Memory  # noqa: E402
 
 config = {
@@ -39,7 +34,16 @@ config = {
 }
 
 try:
+    # Mem0 implicitly initializes its internal default OpenAI client during setup,
+    # so we provide a dummy key only during initialization to prevent api_key errors,
+    # but we disable its automatic LLM calls below using infer=False.
+    # We use setdefault so any user-provided key takes precedence.
+    os.environ.setdefault("OPENAI_API_KEY", "sk-dummy-key")
     memory = Memory.from_config(config)
 except Exception as e:
     logger.warning("Failed to initialize Mem0/Qdrant connection: %s", e)
     memory = None
+finally:
+    # Clean up the dummy key so it doesn't leak to other OpenAI SDK usage
+    if os.environ.get("OPENAI_API_KEY") == "sk-dummy-key":
+        os.environ.pop("OPENAI_API_KEY", None)

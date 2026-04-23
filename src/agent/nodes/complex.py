@@ -797,7 +797,24 @@ async def complex_llm_node(state: AgentState) -> AgentState:
                     "duration_ms": max(0, int((asyncio.get_running_loop().time() - fb_start) * 1000)),
                 })
         else:
-            raise  # medium-default failure — let it propagate
+            # medium-default failure — produce a graceful error instead of crashing the graph
+            logger.error("[complex] Medium-default model failed with no fallback available: %s", e)
+            fallback_chain.append({
+                "model": route,
+                "status": "failed",
+                "reason": str(e)[:120],
+                "duration_ms": max(0, int((asyncio.get_running_loop().time() - (loop_start_time or asyncio.get_running_loop().time())) * 1000)) if loop_start_time else 0,
+            })
+            return AgentState(  # type: ignore[call-arg]
+                messages=[
+                    AIMessage(
+                        content="I encountered an error while processing your request. "
+                                "The language model is currently unavailable. "
+                                "Please check that LM Studio is running and try again."
+                    )
+                ],
+                fallback_chain=fallback_chain,
+            )
 
     # If we fell back from cloud, skip deanonymization — fallback model got non-anonymized input
     if "fallback" in model_label and anon_mapping:

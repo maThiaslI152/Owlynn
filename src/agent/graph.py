@@ -120,7 +120,7 @@ async def init_agent(checkpointer=None):
 
     if checkpointer is None:
         try:
-            from langgraph_checkpoint_redis import AsyncRedisSaver
+            from langgraph.checkpoint.redis.aio import AsyncRedisSaver
             checkpointer = AsyncRedisSaver(url=REDIS_URL)
             await checkpointer.setup()
             logger.info("Using Redis checkpointer at %s", REDIS_URL)

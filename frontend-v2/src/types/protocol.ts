@@ -22,8 +22,18 @@ export interface SecurityApprovalClientEvent {
 
 export interface AssistantMessageEvent {
   type: 'assistant.message'
-  id: string
-  content: string
+  id?: string
+  content?: string
+  message?: {
+    id?: string
+    type?: string
+    content?: string
+    tool_calls?: unknown[]
+    tool_name?: string
+    tool_call_id?: string
+    model_used?: string
+    token_usage?: Record<string, number>
+  }
 }
 
 export interface VoiceStateEvent {
@@ -92,8 +102,20 @@ export interface ToolExecutionEvent {
 }
 
 export type ClientEvent = UserMessageEvent | SecurityApprovalClientEvent
+export interface ChunkEvent {
+  type: 'chunk'
+  content: string
+}
+
+export interface StatusEvent {
+  type: 'status'
+  content: string
+}
+
 export type ServerEvent =
   | AssistantMessageEvent
+  | ChunkEvent
+  | StatusEvent
   | VoiceStateEvent
   | SafeModeChangedEvent
   | ScreenAssistStateEvent

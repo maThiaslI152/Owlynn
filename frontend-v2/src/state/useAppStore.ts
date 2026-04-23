@@ -1,6 +1,15 @@
 import { create } from 'zustand'
 import type { ChatMessage, ConnectionState } from '../types/protocol'
 
+// crypto.randomUUID() polyfill for environments where it's not available
+function uuid() {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID()
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0
+    return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16)
+  })
+}
+
 export type VoiceState =
   | 'idle'
   | 'recording'
@@ -68,6 +77,7 @@ interface AppState {
   memoryUpdatedAt: number | null
   setConnectionState: (state: ConnectionState) => void
   addMessage: (message: ChatMessage) => void
+  appendStreamChunk: (chunk: string) => void
   setVoiceState: (state: VoiceState) => void
   setSafeMode: (mode: SafeModeLevel) => void
   setExecutionPolicy: (policy: ExecutionPolicy) => void
@@ -83,6 +93,7 @@ interface AppState {
   setModelInfo: (model: string | null) => void
   setContextCompression: (info: CompressionInfo | null) => void
   setMemoryUpdatedAt: (ts: number) => void
+  clearSession: () => void
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -109,6 +120,22 @@ export const useAppStore = create<AppState>((set) => ({
     set((state) => ({
       messages: [...state.messages, message],
     })),
+  appendStreamChunk: (chunk) =>
+    set((state) => {
+      const messages = [...state.messages]
+      const last = messages[messages.length - 1]
+      if (last && last.role === 'assistant') {
+        messages[messages.length - 1] = { ...last, content: last.content + chunk }
+      } else {
+        messages.push({
+          id: `stream-${uuid()}`,
+          role: 'assistant',
+          content: chunk,
+          ts: Date.now(),
+        })
+      }
+      return { messages }
+    }),
   setVoiceState: (voiceState) => set({ voiceState }),
   setSafeMode: (safeMode) => set({ safeMode }),
   setExecutionPolicy: (executionPolicy) => set({ executionPolicy }),
@@ -172,4 +199,15 @@ export const useAppStore = create<AppState>((set) => ({
   setModelInfo: (modelInfo) => set({ modelInfo }),
   setContextCompression: (contextCompression) => set({ contextCompression }),
   setMemoryUpdatedAt: (memoryUpdatedAt) => set({ memoryUpdatedAt }),
+  clearSession: () =>
+    set({
+      messages: [],
+      toolExecutionHistory: [],
+      latestToolExecution: null,
+      actionProposals: [],
+      routerMetadata: null,
+      modelInfo: null,
+      contextCompression: null,
+      operatorNote: '',
+    }),
 }))

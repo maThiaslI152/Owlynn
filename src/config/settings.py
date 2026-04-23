@@ -28,8 +28,8 @@ def get_project_workspace(project_id: str | None = None) -> str:
     return str(path.resolve())
 
 # Server Settings
-HOST = "0.0.0.0"
-PORT = 8000
+HOST = os.getenv("HOST", "127.0.0.1")
+PORT = int(os.getenv("PORT", "8000"))
 
 # External Services
 QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")

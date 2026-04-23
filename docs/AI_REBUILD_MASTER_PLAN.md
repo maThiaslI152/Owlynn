@@ -24,7 +24,7 @@ If there is conflict:
 - Frontend: `React + TypeScript` rebuild from zero
 - Data stack:
   - `Redis` for runtime/session hot state
-  - `ChromaDB` for long-term vector memory (via Mem0)
+  - `Qdrant` for long-term vector memory (via Mem0)
   - `SearxNG` for web retrieval
 - Model roles:
   - `gemma-4-e2b-heretic-uncensored-mlx` = fast path

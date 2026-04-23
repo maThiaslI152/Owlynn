@@ -47,6 +47,8 @@ function App() {
   const setModelInfo = useAppStore((s) => s.setModelInfo)
   const setContextCompression = useAppStore((s) => s.setContextCompression)
   const setMemoryUpdatedAt = useAppStore((s) => s.setMemoryUpdatedAt)
+  const appendStreamChunk = useAppStore((s) => s.appendStreamChunk)
+  const clearSession = useAppStore((s) => s.clearSession)
   const [projects, setProjects] = useState<ProjectSummary[]>([])
   const [activeProjectId, setActiveProjectId] = useState('default')
   const [currentThreadId, setCurrentThreadId] = useState('default')
@@ -121,19 +123,52 @@ function App() {
   }, [])
 
   useEffect(() => {
+    // Fetch existing chat history for the current thread
+    const loadHistory = async () => {
+      try {
+        const response = await fetch(`/api/history/${encodeURIComponent(currentThreadId)}`)
+        if (!response.ok) return
+        const history = (await response.json()) as Array<{ type: string; content: string; tool_calls?: unknown[] }>
+        if (!Array.isArray(history)) return
+        for (const msg of history) {
+          if (msg.type === 'ai' || msg.type === 'AIMessage') {
+            addMessage({
+              id: `hist-${crypto.randomUUID()}`,
+              role: 'assistant',
+              content: msg.content || '',
+              ts: Date.now(),
+            })
+          } else if (msg.type === 'human' || msg.type === 'HumanMessage') {
+            addMessage({
+              id: `hist-${crypto.randomUUID()}`,
+              role: 'user',
+              content: msg.content || '',
+              ts: Date.now(),
+            })
+          }
+        }
+      } catch {
+        // History unavailable — non-critical
+      }
+    }
+
     const wsUrl = `${wsBaseUrl}/${encodeURIComponent(currentThreadId)}`
     const wsClient = new WsClient(wsUrl)
     wsClientRef.current = wsClient
     const disconnect = wsClient.connect({
-      onOpen: () => setConnection('connected'),
+      onOpen: () => {
+        setConnection('connected')
+        void loadHistory()
+      },
       onClose: () => setConnection('disconnected'),
       onError: () => setConnection('error'),
       onEvent: (event: ServerEvent) => {
         if (event.type === 'assistant.message') {
+          const msg = 'message' in event ? (event as any).message : event
           addMessage({
-            id: event.id,
+            id: msg.id || crypto.randomUUID(),
             role: 'assistant',
-            content: event.content,
+            content: msg.content || '',
             ts: Date.now(),
           })
         } else if (event.type === 'voice.state') {
@@ -158,6 +193,11 @@ function App() {
           setRouterMetadata(event.metadata as Record<string, unknown>)
         } else if (event.type === 'model_info') {
           setModelInfo(event.model as string)
+        } else if (event.type === 'chunk') {
+          const chunkContent = (event as any).content || ''
+          if (chunkContent) {
+            appendStreamChunk(chunkContent)
+          }
         } else if (event.type === 'context_summarized') {
           setContextCompression({
             summary: event.summary,
@@ -176,7 +216,7 @@ function App() {
       disconnect()
       wsClientRef.current = null
     }
-  }, [addMessage, currentThreadId, executionPolicy, latestToolExecution, pushToolExecution, setConnection, setLatestToolExecution, setMemoryUpdatedAt, setModelInfo, setContextCompression, setOperatorNote, setRouterMetadata, setSafeMode, setScreenAssistMode, setScreenAssistPreviewPath, setScreenAssistSource, setVoiceState, upsertActionProposal, updateActionProposalStatus, wsBaseUrl])
+  }, [addMessage, appendStreamChunk, currentThreadId, executionPolicy, latestToolExecution, pushToolExecution, setConnection, setLatestToolExecution, setMemoryUpdatedAt, setModelInfo, setContextCompression, setOperatorNote, setRouterMetadata, setSafeMode, setScreenAssistMode, setScreenAssistPreviewPath, setScreenAssistSource, setVoiceState, upsertActionProposal, updateActionProposalStatus, wsBaseUrl])
 
   useEffect(() => {
     let unlisten: (() => void) | undefined
@@ -259,6 +299,7 @@ function App() {
     })
     if (!next) return
     projectThreadsRef.current = next.nextProjectThreads
+    clearSession()
     setActiveProjectId(next.nextActiveProjectId)
     setCurrentThreadId(next.nextCurrentThreadId)
     setOperatorNote(next.operatorNote)

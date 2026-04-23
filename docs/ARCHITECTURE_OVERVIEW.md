@@ -171,18 +171,18 @@ Tier 3:   Playwright (full browser)
 
 ### 10. Frontend
 
-- Tauri desktop app loading from FastAPI (http://127.0.0.1:8000)
-- Vanilla HTML/JS/CSS with Tailwind utilities
-- All dependencies vendored locally (offline-capable)
-- WebSocket streaming for real-time responses
-- Tier-colored model badges: gray (small), blue (medium), purple (cloud), orange (fallback)
-- Cloud token indicator: `↑{prompt} ↓{completion}` next to badge
-- Swap indicator: transient message during M-tier model loading
-- Router clarification: choices rendered as clickable buttons via `handleAskUserInterrupt`
+- **Active**: React 19 + TypeScript frontend (Vite 8 + Zustand 5) in `frontend-v2/`
+  - 9 panel components: Composer, OrchestrationPanel, SafeModePanel, ScreenAssistPanel,
+    ToolExecutionPanel (with HMAC audit trail), ActionProposalQueue, LiveTalkControls,
+    ProjectKnowledgePanel, AppShell
+  - WebSocket streaming for real-time responses
+  - Tauri v1 desktop shell for macOS native features (vibrancy, screen capture, push-to-talk)
+  - Styled with Tier-colored model badges (local/cloud), route badges, compression stats
+- **Legacy**: Vanilla HTML/JS/CSS frontend in `frontend/` (end of life, retained for reference)
 
 ### 11. Infrastructure
 
-- **Docker Compose**: Redis (port 6379, 512 MB cap), Qdrant (port 8100), SearXNG (port 8888)
+- **Docker Compose**: Redis (port 6379, 512 MB cap), Qdrant (port 6333), SearXNG (port 8888)
 - **LM Studio**: Local LLM inference server (port 1234)
 - **Redis**: `redis:7-alpine` with AOF persistence, stores conversation checkpoints
 - **No sandbox/container needed for tool execution** — all tools run natively

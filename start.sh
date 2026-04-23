@@ -6,18 +6,18 @@ echo ""
 echo "── Owlynn ──"
 echo ""
 
-# 1. Podman containers
+# 1. Podman / Docker containers
 echo "[1/4] Containers..."
-# Run podman check in background with hard 15s timeout to avoid hanging
+# Run container check in background with hard 15s timeout to avoid hanging
 (
     _running=false
-    podman ps 2>/dev/null | grep -q cowork_chromadb && podman ps 2>/dev/null | grep -q cowork_redis && _running=true
+    podman ps 2>/dev/null | grep -q owlynn_qdrant && podman ps 2>/dev/null | grep -q owlynn_redis && _running=true
     if $_running; then
         echo "      Already running."
     else
         echo "      Starting containers..."
         podman machine start 2>/dev/null
-        podman compose up -d 2>/dev/null || podman-compose up -d 2>/dev/null
+        podman compose up -d 2>/dev/null || podman-compose up -d 2>/dev/null || docker compose up -d 2>/dev/null
         echo "      Waiting 8s for services..."
         sleep 8
     fi

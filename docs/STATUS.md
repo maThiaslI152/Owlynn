@@ -1,6 +1,6 @@
 # Owlynn Status
 
-Last updated: 2026-04-23 (Phase 5 started — test cleanup and live test pass validation)
+Last updated: 2026-04-23 (Phase 6 — MVP hardening)
 
 ## Current Progress
 
@@ -59,11 +59,34 @@ Last updated: 2026-04-23 (Phase 5 started — test cleanup and live test pass va
 
 ## Next Plan
 
-- Phase 4 is now complete. Proceed to Phase 5: Live Test Pass.
-  - Removed stale test files: `test_context_files.py`, `test_router_model_swap.py`. [done]
-  - Fixed tool awareness test assertions to match current guidance. [done]
-  - 203 core backend tests pass, 50 frontend tests pass, build passes. [done]
-- Phase 5 is now complete. Ready for next phase.
+- Phase 5 complete. Phase 6 (MVP Hardening) in progress.
+  - Created `.env.example` with all configurable env vars.
+  - Setup script fixed: Qdrant replaces ChromaDB, matching docker-compose.yml.
+  - Server default host changed from `0.0.0.0` to `127.0.0.1` (local-first security). HOST and PORT now env-configurable.
+  - All 27 `print()` calls in server.py replaced with proper logger calls. Centralized `logging_config.py` created.
+  - All dependencies pinned with safe version ranges in requirements.txt.
+  - Global `OPENAI_API_KEY` env var side effect removed from long_term.py.
+  - Bare `raise` in complex.py:800 replaced with graceful error return.
+  - Added 58 direct unit tests for security_proxy.py and memory.py nodes.
+  - Added 31 frontend-v2 component tests (Composer, OrchestrationPanel, SafeModePanel, LiveTalkControls, ProjectKnowledgePanel, AppShell).
+  - ADR-0001 updated to reflect Tauri v1 (current) rather than v2.
+  - **Test suite: backend 58 new + 83 existing = 141 passed; frontend 31 new + 50 existing = 81 passed across 6 files.**
+
+### Phase 6: MVP Hardening (Current)
+
+| Item | Status |
+|------|--------|
+| `.env.example` with all env vars | Done |
+| Setup script aligned with docker-compose (Qdrant) | Done |
+| `HOST`/`PORT` env-configurable, default `127.0.0.1` | Done |
+| All `print()` → logger, centralized logging setup | Done |
+| Dependencies pinned | Done |
+| `OPENAI_API_KEY` global side-effect removed | Done |
+| Bare `raise` in complex.py handled gracefully | Done |
+| Direct tests for security_proxy.py (58 tests) | Done |
+| Direct tests for memory.py nodes (24 tests) | Done |
+| Frontend-v2 component tests (31 tests) | Done |
+| ADR/docs updated for Tauri v1 accuracy | Done |
 
 ## Roadmap (Phased)
 
@@ -143,7 +166,7 @@ Slice 3 — Orchestration controls in frontend UX:
 <br>All Phase 4 milestones are closed. 3 slices completed across:
 
 Slice 1 — Architecture Decisions Log (ADR):
-- Created `docs/ADR.md` with 11 canonical ADRs tracking key decisions: Tauri v2 shell, LangGraph orchestration, hybrid model architecture, WebSocket transport, Mem0+Qdrant memory, security proxy, Redis+Qdrant hot/vector state, unfiltered content policy, Zustand frontend state, WS telemetry events, auto-summarize compression.
+- Created `docs/ADR.md` with 11 canonical ADRs tracking key decisions: Tauri shell, LangGraph orchestration, hybrid model architecture, WebSocket transport, Mem0+Qdrant memory, security proxy, Redis+Qdrant hot/vector state, unfiltered content policy, Zustand frontend state, WS telemetry events, auto-summarize compression.
 - Each ADR follows context/decision/consequence format for clear trade-off documentation.
 - Cross-referenced in `docs/AI_AGENT_INDEX.md` canonical documentation map.
 
@@ -175,3 +198,15 @@ Slice 3 — Performance & memory SLOs:
 - Fixed 3 assertions in `tests/test_tool_awareness_fix.py`: updated `_looks_like_prose_tool_stall` call signature and tool guidance string checks to match current `COMPLEX_TOOL_GUIDANCE_WEB` content.
 - Core test suite: **203 passed, 0 failed**. Frontend: 50 passed, build passes.
 - Remaining pre-existing failures: `test_sentence_routing_and_response.py` (model_used assertion mismatch), `test_skill_matcher.py` (semantic scorer returns 0 results), `test_prompt_regression.py` (hangs — needs Docker services), web tests (network sandbox). None are regressions from Phase 4/5 changes.
+
+### Phase 6: MVP Hardening (Current)
+
+<br>Hardening the project for MVP release by addressing operational gaps identified in a full audit:
+
+- **Configuration & setup**: `.env.example` created, `setup.sh` aligned with Qdrant (matching docker-compose.yml), `HOST`/`PORT` env-configurable with secure `127.0.0.1` default.
+- **Logging**: All `print()` calls replaced with structured logging via centralized `logging_config.py`.
+- **Dependencies**: All Python deps pinned with safe version ranges.
+- **Bug fixes**: `OPENAI_API_KEY` global side-effect removed, bare `raise` in complex node replaced with graceful error message.
+- **Test coverage**: 58 new backend tests (security proxy + memory nodes) and 31 new frontend-v2 component tests added.
+- **Documentation**: ADR-0001 corrected from Tauri v2 to v1; README updated for v2 frontend and `127.0.0.1` default.
+- **Test suite: 141 backend tests passed, 81 frontend tests passed.**

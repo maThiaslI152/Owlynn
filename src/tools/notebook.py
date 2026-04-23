@@ -95,7 +95,7 @@ def notebook_run(code: str = "") -> str:
                 try:
                     result = eval(code, _notebook_globals)
                     if result is not None:
-                        print(repr(result))
+                        logger.debug("REPL result: %s", repr(result))
                 except Exception:
                     raise
 

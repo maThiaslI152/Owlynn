@@ -8,11 +8,14 @@ servers as native LangChain tools by establishing STDIO transports.
 import asyncio
 import json
 import os
+import logging
 from typing import List, Dict, Any, Optional
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from langchain_core.tools import BaseTool, Tool
 from pydantic import Field
+
+logger = logging.getLogger(__name__)
 
 class MCPTool(BaseTool):
     """
@@ -59,7 +62,7 @@ class MCPClientManager:
             return
             
         if not os.path.exists(config_path):
-            print(f"No MCP config found at {config_path}. Skipping external tools.")
+            logger.info("No MCP config found at %s. Skipping external tools.", config_path)
             self._initialized = True
             return
 
@@ -67,7 +70,7 @@ class MCPClientManager:
             with open(config_path, "r") as f:
                 config = json.load(f)
         except Exception as e:
-            print(f"Failed to load MCP config: {e}")
+            logger.warning("Failed to load MCP config: %s", e)
             self._initialized = True
             return
             
@@ -101,9 +104,9 @@ class MCPClientManager:
                                 args_schema=None # We could dynamically build this from inputSchema
                             )
                             self.langchain_tools.append(lc_tool)
-                            print(f"Loaded MCP tool: {lc_tool.name}")
+                            logger.info("Loaded MCP tool: %s", lc_tool.name)
             except Exception as e:
-                print(f"Failed to connect to MCP server {name}: {e}")
+                logger.warning("Failed to connect to MCP server %s: %s", name, e)
 
         self._initialized = True
 

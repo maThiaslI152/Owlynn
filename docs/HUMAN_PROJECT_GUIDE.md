@@ -33,7 +33,7 @@ cloud escalation and external tools (like Linear via MCP).
 
 1. Install Python dependencies: `pip install -r requirements.txt`
 2. Start supporting services (Redis/Qdrant etc.)
-3. Run backend: `python -m uvicorn src.api.server:app --host 0.0.0.0 --port 8000`
+3. Run backend: `python -m uvicorn src.api.server:app --host 127.0.0.1 --port 8000`
 4. Run tests before merge:
   - Backend: `pytest tests/ -v`
   - Frontend: `cd frontend && npx vitest run`

@@ -15,7 +15,7 @@ This document is the canonical rebuild handoff for the new direction:
 - Daily-use local assistant for Mac Air M4.
 - Data stack:
   - `Redis` for hot/session state.
-  - `ChromaDB` for long-term vector memory (via Mem0).
+  - `Qdrant` for long-term vector memory (via Mem0).
   - `SearxNG` for local web retrieval.
 - Model roles:
   - fast path: `gemma-4-e2b-heretic-uncensored-mlx`
@@ -353,7 +353,7 @@ Cursor instability has been observed under high CPU load. All agents must follow
 ### 2026-04-23 - Phase 4 governance, release, and SLOs
 
 - Architecture Decision Log (ADR) (`docs/ADR.md`):
-  - 11 ADRs covering: Tauri v2 shell (ADR-0001), LangGraph orchestration (ADR-0002), hybrid model architecture (ADR-0003), WebSocket transport (ADR-0004), Mem0+ChromaDB memory (ADR-0005), security proxy (ADR-0006), Redis+Qdrant (ADR-0007), unfiltered content policy (ADR-0008), Zustand frontend state (ADR-0009), WS telemetry events (ADR-0010), auto-summarize compression (ADR-0011).
+  - 11 ADRs covering: Tauri shell (ADR-0001), LangGraph orchestration (ADR-0002), hybrid model architecture (ADR-0003), WebSocket transport (ADR-0004), Mem0+Qdrant memory (ADR-0005), security proxy (ADR-0006), Redis+Qdrant (ADR-0007), unfiltered content policy (ADR-0008), Zustand frontend state (ADR-0009), WS telemetry events (ADR-0010), auto-summarize compression (ADR-0011).
   - Each ADR follows context/decision/consequence format.
 
 - Linear workflow alignment:
