@@ -1,0 +1,29 @@
+langgraph
+langchain
+langchain-community
+langchain-openai
+mem0ai
+chromadb
+mcp
+fastapi
+uvicorn
+websockets
+watchdog
+pandas
+openpyxl
+python-docx
+python-pptx
+tabulate
+# Browser and web tools
+duckduckgo-search>=6.0
+playwright>=1.40.0
+beautifulsoup4>=4.12.0
+httpx>=0.24.0
+curl_cffi>=0.7.1
+# File format processing
+PyYAML>=6.0
+tomli>=2.0.0
+tomli_w>=1.0.0
+pymupdf>=1.23.0
+# Redis-backed LangGraph checkpointer
+langgraph-checkpoint-redis

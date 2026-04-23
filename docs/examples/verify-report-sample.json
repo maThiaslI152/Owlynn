@@ -1,0 +1,17 @@
+{
+  "schema_version": "owlynn.audit.verify-report.v1",
+  "ts": 1776920400000,
+  "status": "fail",
+  "reason": "Manifest root hash mismatch",
+  "records_checked": 12,
+  "root_hash": "9f2ac7a8f2696f83238f1a5098a4ecf00e2b4b27d7f5d26d1f6f5ea0d1f8e2cc",
+  "manifest_file": "owlynn-tool-audit-1776920400000.jsonl.manifest.json",
+  "bundle_file": "owlynn-tool-audit-1776920400000.jsonl",
+  "trace": [
+    "loaded files",
+    "parsed 12 rows",
+    "hash chain validated",
+    "expected root=1c9e3ff5142a...",
+    "actual root=9f2ac7a8f269..."
+  ]
+}

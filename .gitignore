@@ -1,0 +1,61 @@
+# Virtual Environment
+.venv/
+.venv-local/
+venv/
+ENV/
+
+# Python Caches
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+
+# OS Files
+.DS_Store
+Thumbs.db
+
+# IDE / Editor
+.idea/
+.vscode/
+.cursor/
+.antigravity/
+
+# Project-specific logs and data
+graph_error.log
+data/
+workspace/
+
+# Environment Variables
+.env
+.flaskenv
+
+# Test caches
+.pytest_cache/
+.hypothesis/
+
+# Kiro
+.kiro/
+
+# Rust / Tauri
+src-tauri/target/
+
+# ChromaDB local data
+src/tools/glossaries/chroma_db/
+
+# Node
+node_modules/
+
+# Rebuild copy exclusions
+.worktrees/
+example/
+frontend-v2/dist/
+agent-transcripts/
+uploads/
+chroma_data/
+qdrant_data/
+redis_data/
+*.rdb
+*.aof
+*.log

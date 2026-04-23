@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Owlynn — Aurora AI</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="auroraShell">
+    <!-- Title Bar -->
+    <div id="titleBar">
+      <span class="title-brand">OWLYNN AI</span>
+      <div class="title-status">
+        <span class="aurora-dot offline" id="statusDot"></span>
+        <span id="statusText">Offline</span>
+      </div>
+      <div class="title-spacer"></div>
+      <span id="sessionTokenUsage"></span>
+      <button class="icon-btn" id="settingsBtn" title="Settings">
+        <i data-lucide="settings"></i>
+      </button>
+    </div>
+
+    <!-- 3-Column Layout -->
+    <div id="auroraColumns">
+      <!-- Left: Project Explorer -->
+      <div id="projectExplorer">
+        <div class="pane-header">
+          <span>Explorer</span>
+          <div class="pane-header-actions">
+            <button id="newProjectBtn" class="pv-action-btn" title="New Project">
+              <i data-lucide="folder-plus"></i>
+            </button>
+            <button id="collapseLeftBtn" title="Hide Explorer">◀</button>
+          </div>
+        </div>
+        <div id="projectTree"><div style="padding:8px;font-size:12px;color:#888;">Loading projects...</div></div>
+      </div>
+
+      <!-- Center: Orchestrator Panel -->
+      <div id="orchestratorPanel">
+        <div class="pane-resize-handle left"></div>
+
+        <!-- Expand tabs (visible when side panels are collapsed) -->
+        <button id="expandLeftTab" class="expand-tab" title="Show Explorer">▶</button>
+        <button id="expandRightTab" class="expand-tab" title="Show Knowledge Map">◀</button>
+
+        <!-- Project Header -->
+        <div id="projectHeader">
+          <span id="projectName">Project: General Workspace</span>
+          <span id="contextCount">Context: 0/0 Files</span>
+        </div>
+
+        <!-- Tab Navigation -->
+        <div id="tabNav">
+          <button class="tab active" data-tab="chat">Chat</button>
+          <button class="tab" data-tab="stage">Stage</button>
+        </div>
+
+        <!-- Chat View -->
+        <div id="chatView">
+          <div id="contextHealthBar"><!-- ContextHealthBar renders here --></div>
+          <div id="greetingView" class="welcome-center">
+            <h1 class="welcome-heading" id="greetingText">Good morning, User.</h1>
+            <p style="color: var(--text-muted); font-size: 0.95rem;">How can I assist you today?</p>
+          </div>
+          <div class="chat-container" id="chatContainer">
+            <div class="messages-area" id="messagesArea"></div>
+          </div>
+        </div>
+
+        <!-- Stage View (hidden by default) -->
+        <div id="stageView" class="hidden">
+          <div id="stageHeader"><!-- filename, type, modified indicator --></div>
+          <div id="toolDock"><!-- ToolDock renders here --></div>
+          <div id="editorContainer"><!-- CodeMirror instance --></div>
+        </div>
+
+        <!-- Bottom Input Bar (moved inside orchestrator) -->
+        <div id="bottomBar">
+          <div id="attachmentPreviews" class="attachment-previews hidden"></div>
+          <textarea id="messageInput" placeholder="Message Owlynn..." rows="1"></textarea>
+          <button class="icon-btn" id="attachFileBtn" title="Attach File">
+            <i data-lucide="paperclip"></i>
+          </button>
+          <button class="icon-btn" id="micBtn" title="Mic">
+            <i data-lucide="mic"></i>
+          </button>
+          <button class="send-btn" id="sendBtn" title="Send">
+            <i data-lucide="send"></i>
+          </button>
+        </div>
+
+        <div class="pane-resize-handle right"></div>
+      </div>
+
+      <!-- Workspace: project inspector + file list -->
+      <div id="workspacePanel" class="workspace-panel hidden">
+        <div id="workspaceDropZone" class="hidden workspace-drop-zone">
+          <span>Drop files to upload</span>
+        </div>
+        <div id="workspaceResizeHandle" class="workspace-resize-handle" aria-hidden="true"></div>
+        <div class="pane-header">
+          <span>Workspace</span>
+          <div class="pane-header-actions">
+            <button type="button" id="uploadWorkspaceBtn" class="pv-action-btn" title="Upload files">
+              <i data-lucide="upload"></i>
+            </button>
+            <button type="button" id="newFolderBtn" class="pv-action-btn" title="New folder">
+              <i data-lucide="folder-plus"></i>
+            </button>
+          </div>
+        </div>
+        <div id="workspaceInspector">
+          <div id="projectInspectorTitle" class="workspace-inspector-title">—</div>
+          <p id="projectInspectorInstructions">—</p>
+          <div class="workspace-usage-row">
+            <div class="workspace-usage-track">
+              <div id="projectInspectorUsageBar" class="workspace-usage-fill" style="width:0%"></div>
+            </div>
+            <span id="projectInspectorUsage" class="workspace-usage-label">0%</span>
+          </div>
+          <p id="projectInspectorMeta">0 chats • 0 files</p>
+          <p id="projectInspectorStatus" class="workspace-inspector-status">—</p>
+        </div>
+        <div id="workspaceBreadcrumbs"></div>
+        <div id="workspaceFilesList"></div>
+        <input type="file" id="workspaceFileInput" multiple class="hidden" />
+      </div>
+
+      <!-- Right: Knowledge Map -->
+      <div id="knowledgePanel">
+        <div class="pane-resize-handle left"></div>
+        <div class="pane-header">
+          <span>Knowledge Map</span>
+          <button id="collapseRightBtn">▶</button>
+        </div>
+        <div id="knowledgeEntries"><!-- KnowledgeMap renders here --></div>
+      </div>
+
+      <!-- Content Preview Panel (hidden by default) -->
+      <div id="contentPreviewPanel" class="hidden">
+        <div class="aurora-preview-toolbar" id="previewToolbar">
+          <!-- Toolbar buttons rendered by JS -->
+        </div>
+        <div id="previewContent" style="flex:1; overflow:auto; padding:1rem;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── Settings Modal ─── -->
+  <div id="settingsModal" class="modal hidden">
+    <div class="modal-backdrop" onclick="document.getElementById('settingsModal').classList.add('hidden')"></div>
+    <div class="modal-dialog modal-lg modal-tall">
+      <div class="modal-header">
+        <h2>Settings</h2>
+        <button class="icon-btn" onclick="document.getElementById('settingsModal').classList.add('hidden')">
+          <i data-lucide="x"></i>
+        </button>
+      </div>
+      <div class="modal-body" id="settingsBody">
+        <!-- Settings content rendered by JS -->
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── Spotlight Search Modal ─── -->
+  <div id="spotlightModal" class="modal hidden" style="align-items:flex-start;">
+    <div class="modal-backdrop" onclick="document.getElementById('spotlightModal').classList.add('hidden')"></div>
+    <div class="spotlight-panel">
+      <div class="spotlight-input-row">
+        <i data-lucide="search"></i>
+        <input type="text" id="spotlightInput" placeholder="Search or type a command..." autocomplete="off">
+      </div>
+      <div class="spotlight-results" id="spotlightResults"></div>
+    </div>
+  </div>
+
+  <!-- ─── File Viewer Modal ─── -->
+  <div id="fileViewerModal" class="modal hidden">
+    <div class="modal-backdrop" onclick="document.getElementById('fileViewerModal').classList.add('hidden')"></div>
+    <div class="modal-dialog modal-lg modal-tall">
+      <div class="modal-header">
+        <h3 id="fileViewerTitle">File Viewer</h3>
+        <button class="icon-btn" onclick="document.getElementById('fileViewerModal').classList.add('hidden')">
+          <i data-lucide="x"></i>
+        </button>
+      </div>
+      <div class="modal-body file-viewer-body" id="fileViewerBody"></div>
+    </div>
+  </div>
+
+  <!-- ─── Security Approval Modal ─── -->
+  <div id="securityApprovalModal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-dialog modal-sm">
+      <h3 style="margin-bottom:0.75rem;">Security Approval Required</h3>
+      <p id="securityApprovalText" style="font-size:0.9rem; color:var(--text-muted); margin-bottom:1rem;"></p>
+      <div id="securityApprovalArgs" class="tool-io" style="margin-bottom:1rem;"></div>
+      <div class="modal-actions">
+        <button class="btn-danger" id="securityDenyBtn">Deny</button>
+        <button class="btn-accent" id="securityApproveBtn">Approve</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── Custom Confirm Modal ─── -->
+  <div id="customConfirmModal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-dialog modal-sm">
+      <h3 id="confirmModalTitle" style="margin-bottom:0.75rem;">Confirm</h3>
+      <p id="confirmModalMessage" style="font-size:0.9rem; color:var(--text-muted); margin-bottom:1.25rem; white-space:pre-wrap;"></p>
+      <div class="modal-actions">
+        <button class="btn-outline" id="cancelConfirmBtn">Cancel</button>
+        <button class="btn-accent" id="confirmConfirmBtn">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── Custom Input Modal ─── -->
+  <div id="customInputModal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-dialog modal-sm">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem;">
+        <h3 id="customInputTitle">Input</h3>
+        <button class="icon-btn" id="closeCustomInputBtn">
+          <i data-lucide="x"></i>
+        </button>
+      </div>
+      <div class="form-field">
+        <label id="customInputLabel" style="font-size:0.8rem; color:var(--text-muted); margin-bottom:0.35rem; display:block;"></label>
+        <input type="text" id="customInputField" class="modal-input" placeholder="" style="width:100%; padding:0.5rem 0.75rem; border-radius:0.5rem; border:1px solid var(--border); background:var(--surface); color:var(--text); font-size:0.9rem;">
+      </div>
+      <div class="modal-actions" style="margin-top:1rem;">
+        <button class="btn-outline" id="cancelCustomInputBtn">Cancel</button>
+        <button class="btn-accent" id="confirmCustomInputBtn">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Drag Overlay -->
+  <div id="dragOverlay" class="drag-overlay hidden">
+    <div class="drag-overlay-inner">
+      <i data-lucide="upload"></i>
+      <p>Drop files here</p>
+      <span>Attach to your message</span>
+    </div>
+  </div>
+
+  <!-- Hidden file input -->
+  <input type="file" id="fileInput" multiple style="display:none">
+
+  <!-- Vendor Scripts -->
+  <script src="vendor/tailwind.js"></script>
+  <script src="vendor/marked.min.js"></script>
+  <script src="vendor/purify.min.js"></script>
+  <script src="vendor/mammoth.min.js"></script>
+  <script src="vendor/lucide.min.js"></script>
+  <script src="vendor/codemirror-loader.js"></script>
+
+  <!-- Module Scripts -->
+  <script src="modules/workspace-state.js"></script>
+  <script src="modules/explorer.js"></script>
+  <script src="modules/context-health-bar.js"></script>
+  <script src="modules/stage.js"></script>
+  <script src="modules/tool-dock.js"></script>
+  <script src="modules/command-bar.js"></script>
+  <script src="modules/orchestrator-panel.js"></script>
+  <script src="modules/knowledge-map.js"></script>
+
+  <!-- App Script -->
+  <script src="script.js"></script>
+
+  <!-- Initialize Aurora Layout + Lucide Icons -->
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      // Detect Tauri — enable transparent vibrancy mode
+      const isTauri = !!(window.__TAURI__ || location.protocol === 'tauri:');
+      if (isTauri) {
+        document.body.classList.add('tauri-vibrancy');
+        const titleBar = document.getElementById('titleBar');
+        if (titleBar) {
+          titleBar.addEventListener('mousedown', async (e) => {
+            if (e.target.closest('button, input, a, [data-no-drag]')) return;
+            if (e.button !== 0) return;
+            try {
+              if (window.__TAURI__?.invoke) {
+                await window.__TAURI__.invoke('tauri', { __tauriModule: 'Window', message: { cmd: 'manage', data: { cmd: { type: 'startDragging' } } } });
+              } else if (window.__TAURI__?.window?.appWindow?.startDragging) {
+                await window.__TAURI__.window.appWindow.startDragging();
+              }
+            } catch (_) {}
+          });
+        }
+      }
+      if (window.lucide) lucide.createIcons();
+      if (typeof initAuroraLayout === 'function') initAuroraLayout();
+    });
+  </script>
+</body>
+</html>

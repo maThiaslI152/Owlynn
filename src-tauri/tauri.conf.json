@@ -1,0 +1,49 @@
+{
+  "build": {
+    "distDir": "../frontend-v2/dist",
+    "devPath": "http://127.0.0.1:5173",
+    "withGlobalTauri": true
+  },
+  "package": {
+    "version": "0.1.0",
+    "productName": "Owlynn"
+  },
+  "tauri": {
+    "macOSPrivateApi": true,
+    "allowlist": {
+      "all": false
+    },
+    "bundle": {
+      "active": true,
+      "category": "DeveloperTool",
+      "identifier": "com.owlynn.app",
+      "icon": [
+        "icons/32x32.png",
+        "icons/128x128.png",
+        "icons/128x128@2x.png",
+        "icons/icon.icns",
+        "icons/icon.ico"
+      ],
+      "targets": "all"
+    },
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: http://127.0.0.1:8000; connect-src 'self' ws://127.0.0.1:8000 http://127.0.0.1:8000; font-src 'self';"
+    },
+    "windows": [
+      {
+        "fullscreen": false,
+        "height": 800,
+        "resizable": true,
+        "title": "Owlynn",
+        "width": 1200,
+        "minWidth": 800,
+        "minHeight": 600,
+        "transparent": true,
+        "decorations": true,
+        "fileDropEnabled": false,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true
+      }
+    ]
+  }
+}

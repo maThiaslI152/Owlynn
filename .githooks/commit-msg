@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Non-blocking warning hook for Linear issue key hygiene.
+# It warns when both:
+# - branch name does not include a WIN-123 style key, and
+# - commit message does not include a WIN-123 style key.
+
+MSG_FILE="${1:-}"
+if [[ -z "${MSG_FILE}" || ! -f "${MSG_FILE}" ]]; then
+  exit 0
+fi
+
+# Skip auto-generated merge/revert/fixup/squash commits.
+first_line="$(sed -n '1p' "${MSG_FILE}" || true)"
+if [[ "${first_line}" =~ ^(Merge|Revert|fixup!|squash!) ]]; then
+  exit 0
+fi
+
+issue_re='WIN-[0-9]+'
+
+branch_name="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")"
+message_text="$(cat "${MSG_FILE}")"
+
+branch_has_key=false
+msg_has_key=false
+
+if [[ "${branch_name}" =~ ${issue_re} ]]; then
+  branch_has_key=true
+fi
+
+if [[ "${message_text}" =~ ${issue_re} ]]; then
+  msg_has_key=true
+fi
+
+if [[ "${branch_has_key}" == false && "${msg_has_key}" == false ]]; then
+  echo ""
+  echo "⚠️  Linear key warning:"
+  echo "   Branch and commit message are both missing a Linear issue key (e.g. WIN-7)."
+  echo "   Recommended:"
+  echo "   - Branch: WIN-7-short-description"
+  echo "   - Commit: feat(scope): message (WIN-7)"
+  echo ""
+fi
+
+exit 0
