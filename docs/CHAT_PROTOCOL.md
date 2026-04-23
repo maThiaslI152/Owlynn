@@ -122,7 +122,23 @@ Sent during streaming (LangGraph `on_chat_model_stream`) for nodes:
 - `complex_llm`
 - (legacy) `tool_executor` (not currently wired into the graph)
 
-Note: the current server implementation sends `content` and (effectively) omits metadata.
+When a `TokenBudgetTracker` is active (initialized from the router's `token_budget`), each chunk includes an optional `metadata` field:
+
+```json
+{
+  "type": "chunk",
+  "content": "Hello, ",
+  "metadata": {
+    "tokens_used": 12,
+    "budget_remaining": 3988
+  }
+}
+```
+
+- `tokens_used` — cumulative tokens consumed so far (estimated as `len(text) // 4` per chunk)
+- `budget_remaining` — tokens remaining in the allocated budget
+
+The `metadata` field is optional. Frontend code that does not handle `metadata` continues to work without errors.
 
 ### 3) `message`
 
@@ -193,11 +209,203 @@ These are derived from `AIMessage.tool_calls` + `ToolMessage` outputs in `websoc
 
 Sent by `notify_file_processed()` to trigger UI refresh of the workspace file panel.
 
-## Events the frontend listens to (but the backend may not currently emit)
+### 7) `model_info`
 
-- `model_info`: the frontend listens, but current backend code does not send it.
+```json
+{
+  "type": "model_info",
+  "model": "string",
+  "swapping": true | false,
+  "token_usage": {
+    "prompt_tokens": 150,
+    "completion_tokens": 320
+  },
+  "fallback_chain": [
+    {
+      "model": "large-cloud",
+      "status": "failed",
+      "reason": "API key invalid",
+      "duration_ms": 42
+    },
+    {
+      "model": "medium-default-fallback",
+      "status": "success",
+      "reason": "fallback",
+      "duration_ms": 8
+    }
+  ]
+}
+```
 
-If you add those events in backend nodes, document the exact payload shapes in this file.
+Sent after `complex_llm` or `simple` node completes, when a `model_used` value is present in the node output.
+
+Fields:
+- `model` — the model that produced the response (e.g. `"medium-default"`, `"large-cloud"`)
+- `swapping` — whether a model swap occurred
+- `token_usage` — (optional) prompt and completion token counts from the API response; present only when the model reports usage
+- `fallback_chain` — (optional) ordered list of model attempts; present only when `complex_llm_node` records fallback steps. Each entry is a `FallbackStep`:
+  - `model` — non-empty model identifier
+  - `status` — `"success"`, `"failed"`, or `"skipped"`
+  - `reason` — human-readable explanation
+  - `duration_ms` — time spent on this attempt (≥ 0)
+
+The chain always has at least one entry and exactly one entry with `status == "success"`. Entries are ordered chronologically.
+
+This event is a backward-compatible superset of the original `model_info` shape — existing fields (`type`, `model`, `swapping`) are preserved; `token_usage` and `fallback_chain` are additive.
+
+### 8) `router_info`
+
+```json
+{
+  "type": "router_info",
+  "metadata": {
+    "route": "complex-default",
+    "confidence": 0.87,
+    "reasoning": "Code generation task detected",
+    "swap_decision": "not_needed",
+    "swap_from": "default",
+    "swap_to": null,
+    "classification_source": "llm_classifier",
+    "token_budget": 4096,
+    "cloud_available": true,
+    "features": {
+      "has_images": false,
+      "task_category": "coding",
+      "estimated_tokens": 320,
+      "web_intent": false
+    }
+  }
+}
+```
+
+Sent after the `router` node completes its routing decision, **before** the first `chunk` event for that message.
+
+Metadata fields:
+- `route` — the chosen route (e.g. `"simple"`, `"complex-default"`, `"complex-cloud"`, `"complex-vision"`, `"complex-longctx"`)
+- `confidence` — classification confidence in [0.0, 1.0]
+- `reasoning` — human-readable explanation of the routing decision
+- `swap_decision` — `"kept"`, `"swapped"`, or `"not_needed"`
+- `swap_from` / `swap_to` — previous and target model variants (null when no swap)
+- `classification_source` — `"keyword_bypass"`, `"deterministic"`, `"llm_classifier"`, or `"hitl"`
+- `token_budget` — allocated token budget for the response
+- `cloud_available` — whether cloud escalation was an option
+- `features` — key features that influenced the decision (never contains raw message text):
+  - `has_images` — whether the input contained images
+  - `task_category` — detected task type
+  - `estimated_tokens` — estimated input token count
+  - `web_intent` — whether web search intent was detected
+
+If `router_metadata` contains non-serializable values, the event is omitted and a warning is logged.
+
+### 9) `token_budget_update`
+
+```json
+{
+  "type": "token_budget_update",
+  "used": 1024,
+  "total": 4096,
+  "remaining": 3072,
+  "percent": 0.25
+}
+```
+
+Sent after streaming completes (when the `complex_llm` or `simple` node finishes), providing a final summary of token budget consumption.
+
+Fields:
+- `used` — total tokens consumed during streaming
+- `total` — the allocated budget (from the router's `token_budget`)
+- `remaining` — tokens remaining (`max(0, total - used)`)
+- `percent` — fraction of budget consumed (can exceed 1.0 if streaming overruns the budget)
+
+### 10) `cloud_budget_warning`
+
+```json
+{
+  "type": "cloud_budget_warning",
+  "used": 420000,
+  "limit": 500000,
+  "percent": 84.0,
+  "level": "warning"
+}
+```
+
+Sent when cumulative cloud token usage crosses a configured threshold. Thresholds default to 50%, 80%, and 95% of the daily limit.
+
+Fields:
+- `used` — cumulative cloud tokens consumed this session
+- `limit` — the configured daily token limit (default 500,000)
+- `percent` — usage as a percentage of the limit
+- `level` — severity level:
+  - `"info"` — usage crossed 50%
+  - `"warning"` — usage crossed 80%
+  - `"critical"` — usage crossed 95%
+
+Each level is emitted at most once per session. Levels are emitted in order: `"info"` → `"warning"` → `"critical"`. If `cloud_daily_token_limit` is 0 or negative, no warnings are emitted.
+
+### 11) `memory_updated`
+
+```json
+{
+  "type": "memory_updated",
+  "thread_id": "abc-123"
+}
+```
+
+Sent after `memory_write_node` saves new data and invalidates the memory context cache for the thread.
+
+Fields:
+- `thread_id` — the thread whose memory context was updated
+
+The frontend can use this event to know that the memory context is fresh and any cached state should be refreshed.
+
+## REST API: Consolidated Settings
+
+### `GET /api/unified-settings`
+
+Returns all user-facing settings in a single response, merging fields from `GET /api/profile` and `GET /api/advanced-settings`.
+
+```json
+{
+  "name": "string",
+  "preferred_language": "en",
+  "response_style": "concise",
+
+  "small_llm_base_url": "http://127.0.0.1:1234/v1",
+  "small_llm_model_name": "liquid/lfm2.5-1.2b",
+  "llm_base_url": "http://127.0.0.1:1234/v1",
+  "llm_model_name": "qwen/qwen3.5-9b",
+  "medium_models": {},
+  "cloud_llm_base_url": "https://api.deepseek.com/v1",
+  "cloud_llm_model_name": "deepseek-chat",
+  "deepseek_api_key": "••••••••",
+
+  "temperature": 0.7,
+  "top_p": 0.9,
+  "max_tokens": 2048,
+  "top_k": 40,
+  "streaming_enabled": true,
+  "show_thinking": false,
+  "show_tool_execution": true,
+  "lm_studio_fold_system": true,
+
+  "cloud_escalation_enabled": true,
+  "cloud_anonymization_enabled": true,
+  "router_hitl_enabled": true,
+  "router_clarification_threshold": 0.6,
+  "custom_sensitive_terms": [],
+  "redis_url": "redis://localhost:6379",
+
+  "cloud_daily_token_limit": 500000,
+  "cloud_budget_warning_thresholds": [0.5, 0.8, 0.95]
+}
+```
+
+Notes:
+- `deepseek_api_key` is always masked (`"••••••••"` when present, `""` when absent) — the raw key is never returned.
+- `cloud_daily_token_limit` defaults to 500,000 when not configured.
+- `cloud_budget_warning_thresholds` defaults to `[0.5, 0.8, 0.95]` when not configured.
+- The existing `GET /api/profile` and `GET /api/advanced-settings` endpoints remain unchanged for backward compatibility.
+- If `get_profile()` raises an exception, the endpoint returns an error response and the frontend falls back to the individual endpoints.
 
 ## Reference: where to change the contract
 
