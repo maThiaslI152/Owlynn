@@ -18,18 +18,47 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 
 async def main():
+    # Mirror the same import order as init_agent() in src/agent/graph.py
+    AsyncRedisSaver = None
+    import_style = None
+    errors = []
+
+    # 1) Primary: langgraph.checkpoint.redis (newer package versions)
     try:
-        from langgraph_checkpoint_redis import AsyncRedisSaver
-    except ImportError:
-        print("SKIP: langgraph-checkpoint-redis not installed")
-        sys.exit(0)
+        from langgraph.checkpoint.redis import AsyncRedisSaver as _PrimarySaver
+        AsyncRedisSaver = _PrimarySaver
+        import_style = "primary"
+        print("OK: Imported AsyncRedisSaver via langgraph.checkpoint.redis")
+    except Exception as e:
+        errors.append(f"  langgraph.checkpoint.redis → {type(e).__name__}: {e}")
+
+    # 2) Legacy fallback: langgraph_checkpoint_redis (older package versions)
+    if AsyncRedisSaver is None:
+        try:
+            from langgraph_checkpoint_redis import AsyncRedisSaver as _LegacySaver
+            AsyncRedisSaver = _LegacySaver
+            import_style = "legacy"
+            print("OK: Imported AsyncRedisSaver via langgraph_checkpoint_redis (legacy)")
+        except Exception as e:
+            errors.append(f"  langgraph_checkpoint_redis → {type(e).__name__}: {e}")
+
+    if AsyncRedisSaver is None:
+        print("FAIL: Could not import AsyncRedisSaver from any known path.")
+        print("Tried the following import paths (same order as init_agent()):")
+        for err in errors:
+            print(err)
+        sys.exit(1)
 
     redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
     print(f"Connecting to Redis at {redis_url} ...")
 
     try:
-        checkpointer = AsyncRedisSaver(url=redis_url)
-        await checkpointer.setup()
+        if import_style == "primary":
+            checkpointer = AsyncRedisSaver(redis_url=redis_url)
+            await checkpointer.asetup()
+        else:
+            checkpointer = AsyncRedisSaver(url=redis_url)
+            await checkpointer.setup()
         print("OK: Connected and setup complete.")
     except Exception as e:
         print(f"SKIP: Cannot connect to Redis — {e}")

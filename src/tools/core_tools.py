@@ -1,8 +1,19 @@
 """
-Core Tools for the Local Cowork Agent.
+Core Tools — File Operations, Memory Recall, and Workspace Management
+======================================================================
 
-File management, memory, and workspace tools.
-No sandbox/container dependencies — runs natively.
+Provides the fundamental tool set for the agent:
+
+- **read_workspace_file**: Read files with smart truncation (20K char cap).
+  Checks ``.processed/`` cache first for pre-extracted content (PDF, DOCX, etc.).
+- **write_workspace_file**: Write/overwrite files in the project workspace.
+- **edit_workspace_file**: Search-and-replace within a file.
+- **list_workspace_files**: Directory listing with file sizes.
+- **delete_workspace_file**: Remove a file from the workspace.
+- **recall_memories**: Keyword search against JSON-based long-term memory.
+
+All file operations are sandboxed to the active project workspace via
+``get_safe_workspace_path()``, which prevents path traversal attacks.
 """
 
 import os
@@ -42,9 +53,14 @@ def read_workspace_file(filename: str) -> str:
         try:
             fn = os.path.basename(filepath)
             search_dir = os.path.dirname(filepath) or tool_workspace_root()
-            matches = [f for f in os.listdir(search_dir) if fn in f or f in fn]
-            if matches:
+            # Only match files that START with the requested name (prefix match)
+            # to avoid accidentally opening unrelated files like "test_results_confidential.csv"
+            # when the user asked for "test".
+            matches = [f for f in os.listdir(search_dir) if f.startswith(fn) or fn.startswith(f)]
+            if len(matches) == 1:
                 filepath = os.path.join(search_dir, matches[0])
+            elif matches:
+                return f"Error: File '{filename}' not found. Did you mean one of: {', '.join(sorted(matches)[:5])}?"
             else:
                 return f"Error: File '{filename}' not found."
         except Exception:
@@ -135,9 +151,12 @@ def edit_workspace_file(filename: str, search_pattern: str, replacement_text: st
             content = f.read()
         if search_pattern not in content:
             return f"Error: Pattern not found in {filename}."
+        count = content.count(search_pattern)
+        new_content = content.replace(search_pattern, replacement_text, 1)
         with open(filepath, 'w', encoding='utf-8') as f:
-            f.write(content.replace(search_pattern, replacement_text))
-        return f"✅ Updated {filename}"
+            f.write(new_content)
+        suffix = f" ({count} occurrences found, replaced first)" if count > 1 else ""
+        return f"✅ Updated {filename}{suffix}"
     except Exception as e:
         return f"Error editing file: {e}"
 

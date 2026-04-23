@@ -1,3 +1,23 @@
+"""
+File Processor — Watchdog-Based Workspace File Watcher
+=======================================================
+
+Monitors the workspace directory for new or modified files and automatically
+extracts their text content into ``.processed/`` for LLM consumption.
+
+Supported formats:
+- Documents: PDF, DOCX, PPTX, EPUB, RTF
+- Data: CSV, XLSX, JSON, XML, YAML, TOML, INI
+- Web: HTML, Markdown
+- Database: SQLite
+- Archives: ZIP, TAR, GZ
+- Source code: Python, JS, TS, Java, C++, Go, Rust, Ruby, PHP
+- Logs and plain text (fallback)
+
+The watcher runs in a background thread and notifies the frontend via a
+callback (typically a WebSocket broadcast) when processing completes.
+"""
+
 import os
 import time
 import threading
@@ -10,8 +30,16 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger(__name__)
 
 class FileWatcherHandler(FileSystemEventHandler):
-    """
-    Handles file system events for the workspace, queuing tasks to process files.
+    """Handles filesystem events, queuing files for text extraction.
+
+    On file create/modify, waits briefly for write locks to release,
+    then dispatches to a format-specific processor. Output goes to
+    ``{workspace}/.processed/{filename}.txt`` (or ``.md`` for tables).
+
+    Args:
+        workspace_dir: Absolute path to the watched workspace directory.
+        on_processed_callback: Optional ``(filename, status)`` callback
+            invoked after each file is processed (or on error).
     """
     def __init__(self, workspace_dir, on_processed_callback=None):
         self.workspace_dir = os.path.abspath(workspace_dir)
@@ -564,7 +592,16 @@ class FileWatcherHandler(FileSystemEventHandler):
                 f.write(f"# Error Reading File\n\nCould not read file: {e}\n")
 
 def start_watcher(workspace_dir, on_processed_callback=None):
-    """Starts the observer thread in background."""
+    """Start the watchdog observer thread in the background.
+
+    Args:
+        workspace_dir: Path to the workspace directory to monitor.
+        on_processed_callback: Optional callback ``(filename, status)``
+            invoked after each file is processed.
+
+    Returns:
+        The running ``Observer`` instance (call ``.stop()`` to shut down).
+    """
     workspace_dir = os.path.abspath(workspace_dir)
     event_handler = FileWatcherHandler(workspace_dir, on_processed_callback=on_processed_callback)
     observer = Observer()

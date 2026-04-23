@@ -1,11 +1,33 @@
+"""
+Memory Nodes — Inject and Write Long-Term Context
+===================================================
+
+Two LangGraph nodes that bookend the reasoning pipeline:
+
+- **memory_inject_node** (runs BEFORE router): Retrieves relevant memories
+  from Mem0/ChromaDB, user profile, persona, project instructions, and
+  enhanced topic/interest context. Caches results for 5 minutes (M4 optimization).
+
+- **memory_write_node** (runs AFTER response): Extracts topics and interests
+  from the conversation turn, records the conversation summary, and saves
+  enriched facts to Mem0 for future retrieval.
+
+Memory scoping:
+- Non-default projects use ``project:<id>`` as the Mem0 user ID (isolated).
+- Default project uses the user's profile name or ``"owner"`` (shared global).
+"""
+
 from langchain_core.messages import AIMessage
 from src.agent.state import AgentState
 from src.memory.memory_manager import save_memory, search_memories
 from src.memory.user_profile import get_profile
 from src.memory.persona import get_persona
 import asyncio
+import logging
 from datetime import datetime, timedelta
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 # Import enhanced personal assistant memory system
 from src.memory.personal_assistant import (
@@ -43,44 +65,75 @@ def _get_mem0_user_id(state: dict) -> str:
 
 # --- M4 OPTIMIZATION: Memory Context Cache ---
 class MemoryContextCache:
-    """Cache memory context to avoid rebuilding for every request."""
+    """In-memory TTL cache for formatted memory context strings.
+
+    Avoids rebuilding the full memory context (Mem0 search + profile + topics)
+    on every request within the same thread. Entries expire after 5 minutes.
+    Invalidated explicitly when memory_write_node saves new facts.
+
+    Uses a threading lock to prevent race conditions from concurrent async tasks.
+    """
     _cache = {}
     _ttl_seconds = 300  # 5 minute cache
+    _lock = __import__("threading").Lock()
     
     @classmethod
     def get(cls, thread_id: str) -> Optional[str]:
         """Get cached context if still valid."""
-        if thread_id in cls._cache:
-            cached_at, context = cls._cache[thread_id]
-            age = datetime.now() - cached_at
-            if age < timedelta(seconds=cls._ttl_seconds):
-                return context
-            else:
-                del cls._cache[thread_id]
-        return None
+        with cls._lock:
+            if thread_id in cls._cache:
+                cached_at, context = cls._cache[thread_id]
+                age = datetime.now() - cached_at
+                if age < timedelta(seconds=cls._ttl_seconds):
+                    return context
+                else:
+                    del cls._cache[thread_id]
+            return None
     
     @classmethod
     def set(cls, thread_id: str, context: str):
         """Cache context with timestamp."""
-        cls._cache[thread_id] = (datetime.now(), context)
+        with cls._lock:
+            cls._cache[thread_id] = (datetime.now(), context)
     
     @classmethod
     def invalidate(cls, thread_id: str):
         """Invalidate cache when memory updates."""
-        if thread_id in cls._cache:
-            del cls._cache[thread_id]
+        with cls._lock:
+            if thread_id in cls._cache:
+                del cls._cache[thread_id]
     
+    @classmethod
+    def invalidate_on_write(cls, thread_id: str):
+        """Called by memory_write_node after saving new memories.
+        Invalidates cache and signals that a WebSocket notification should be sent."""
+        cls.invalidate(thread_id)
+        return True
+
     @classmethod
     def clear_old(cls):
         """Remove expired cache entries."""
         now = datetime.now()
-        expired = [k for k, (t, _) in cls._cache.items() 
-                   if now - t > timedelta(seconds=cls._ttl_seconds)]
-        for k in expired:
-            del cls._cache[k]
+        with cls._lock:
+            expired = [k for k, (t, _) in cls._cache.items() 
+                       if now - t > timedelta(seconds=cls._ttl_seconds)]
+            for k in expired:
+                del cls._cache[k]
 
 # --- READ: fires before the brain node ---
 async def memory_inject_node(state: AgentState) -> AgentState:
+    """Pre-reasoning node: build memory context for the LLM system prompt.
+
+    Retrieves and merges:
+    1. Project-scoped Mem0 memories (semantic search on last user message)
+    2. Global user memories (if in a non-default project)
+    3. User profile fields
+    4. Persona summary
+    5. Enhanced topic/interest context with time decay
+    6. Active project instructions (highest priority)
+
+    Returns state updates: ``memory_context`` and ``persona``.
+    """
     thread_id    = state.get("thread_id", "default")
     user_message = state["messages"][-1].content if state.get("messages") else ""
     
@@ -211,7 +264,15 @@ def format_memory_context(results: list, profile: dict, enhanced_context: str = 
 
 # --- WRITE: fires after response is generated ---
 async def memory_write_node(state: AgentState) -> AgentState:
-    """Extract and save memories, topics, and interests from conversation."""
+    """Post-reasoning node: extract and persist memories from the conversation turn.
+
+    Steps:
+    1. Record conversation summary (topics, interests, key questions)
+    2. Extract topics and interests via regex patterns
+    3. Save enriched fact to Mem0 with stable user ID
+    4. Invalidate memory context cache so next request gets fresh data
+    5. Set ``memory_invalidated=True`` to trigger WebSocket notification
+    """
     thread_id = state.get("thread_id", "default")
     messages  = state.get("messages", [])
     session_id = state.get("session_id", thread_id)
@@ -247,7 +308,7 @@ async def memory_write_node(state: AgentState) -> AgentState:
         await asyncio.to_thread(record_conversation, message_dicts, session_id)
         
     except Exception as e:
-        print(f"[Memory] Failed to record conversation: {e}")
+        logger.warning("[Memory] Failed to record conversation: %s", e)
     
     # Save enriched facts to long-term memory
     from src.memory.long_term import memory
@@ -264,18 +325,20 @@ async def memory_write_node(state: AgentState) -> AgentState:
             enriched_fact = MemoryEnricher.enrich_memory(fact_text, topics, interests)
             
             # Save to Mem0 with STABLE user id (shared across all threads)
+            # infer=False: skip Mem0's internal OpenAI LLM call (we use a dummy key)
             await asyncio.to_thread(
                 memory.add, 
                 fact_text, 
                 user_id=mem0_uid, 
-                infer=True
+                infer=False
             )
             
             # Invalidate memory context cache since memory was updated (M4 optimization)
-            MemoryContextCache.invalidate(thread_id)
+            # Uses invalidate_on_write to signal WebSocket forwarder
+            MemoryContextCache.invalidate_on_write(thread_id)
             
         except Exception as e:
-            print(f"[Memory] Failed to save enriched memory: {e}")
+            logger.warning("[Memory] Failed to save enriched memory: %s", e)
     
-    return {}
+    return {"memory_invalidated": True}
 

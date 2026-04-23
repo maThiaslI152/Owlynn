@@ -1,13 +1,20 @@
 """
-Enhanced Web Search — Adds SearXNG (self-hosted metasearch) and improved extraction.
+Enhanced Web Search — SearXNG Integration
+===========================================
 
-SearXNG is the recommended search backend for local setups:
-- No API keys needed
-- No bot blocking / CAPTCHAs
+Adds SearXNG (self-hosted metasearch) as the primary search backend.
+
+SearXNG advantages for local setups:
+- No API keys needed (self-hosted)
+- No bot blocking or CAPTCHAs
 - Aggregates Google, Bing, DuckDuckGo, Wikipedia, etc.
-- Easy to self-host via Docker
+- Easy to self-host via Docker (``docker-compose up searxng``)
 
-Also adds a smarter content extraction pipeline for fetch_webpage.
+Functions:
+- ``searxng_search(query, categories, max_results)``: Search via local SearXNG.
+- ``searxng_available()``: Health check for the SearXNG instance.
+
+Falls back gracefully (returns ``None``) if SearXNG is not configured or unreachable.
 """
 
 import asyncio

@@ -5,27 +5,30 @@ Manages the agent's name, tone, and role from data/persona.json.
 """
 
 import json
+import logging
 from pathlib import Path
 
-_PERSONA_PATH = Path(__file__).parent.parent.parent / "data" / "persona.json"
+logger = logging.getLogger(__name__)
+
+_PERSONA_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "persona.json"
 
 _DEFAULTS = {
     "name": "Owlynn",
     "role": "AI study tutor and coding assistant",
     "tone": "friendly, encouraging, and clear",
-    "language_preference": "match the user's preferred language"
+    "language_preference": "match the user's preferred language",
 }
 
-VALID_FIELDS = {"name", "role", "tone", "language_preference"}
+VALID_FIELDS = frozenset(_DEFAULTS.keys())
 
 
 def get_persona() -> dict:
     """Load and return the current persona configuration."""
     try:
-        with open(_PERSONA_PATH, "r", encoding="utf-8") as f:
-            data = json.load(f)
+        data = json.loads(_PERSONA_PATH.read_text(encoding="utf-8"))
         return {**_DEFAULTS, **data}
-    except (FileNotFoundError, json.JSONDecodeError):
+    except (FileNotFoundError, json.JSONDecodeError, OSError) as exc:
+        logger.debug("Persona file missing or corrupt, writing defaults: %s", exc)
         _save_persona(_DEFAULTS)
         return _DEFAULTS.copy()
 
@@ -40,10 +43,26 @@ def update_persona_field(field: str, value: str) -> dict:
     return persona
 
 
-def _save_persona(persona: dict):
+def reset_persona() -> dict:
+    """Reset persona to defaults and persist."""
+    _save_persona(_DEFAULTS)
+    return _DEFAULTS.copy()
+
+
+def _save_persona(persona: dict) -> None:
+    """Atomically write persona to disk via temp-file rename."""
     _PERSONA_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with open(_PERSONA_PATH, "w", encoding="utf-8") as f:
-        json.dump(persona, f, ensure_ascii=False, indent=2)
+    tmp = _PERSONA_PATH.with_suffix(".tmp")
+    try:
+        tmp.write_text(
+            json.dumps(persona, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        tmp.replace(_PERSONA_PATH)
+    except OSError as exc:
+        logger.error("Failed to write persona: %s", exc)
+        tmp.unlink(missing_ok=True)
+        raise
 
 
 def persona_to_system_prefix(persona: dict) -> str:

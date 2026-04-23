@@ -14,14 +14,10 @@ logger = logging.getLogger(__name__)
 # Mem0 implicitly initializes its internal default OpenAI client during setup,
 # so we provide a dummy key to prevent `api_key` initialization errors,
 # but we disable its automatic LLM calls below using `infer=False`.
-os.environ["OPENAI_API_KEY"] = "sk-dummy-key"
+os.environ.setdefault("OPENAI_API_KEY", "sk-dummy-key")
 
-from mem0 import Memory
+from mem0 import Memory  # noqa: E402
 
-# Initialize Mem0 to use the local ChromaDB Podman instance
-# Embedder: LM Studio serving nomic-embed-text-v1.5 (768-dim)
-# NOTE: collection changed from cowork_memory_mE5 (multilingual-e5-small)
-#       to cowork_memory_nomic (nomic-embed-text-v1.5) due to different vector spaces.
 config = {
     "vector_store": {
         "provider": "chroma",
@@ -44,5 +40,5 @@ config = {
 try:
     memory = Memory.from_config(config)
 except Exception as e:
-    logger.warning(f"Failed to initialize Mem0/ChromaDB connection: {e}")
+    logger.warning("Failed to initialize Mem0/ChromaDB connection: %s", e)
     memory = None
