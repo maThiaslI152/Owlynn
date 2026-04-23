@@ -1,13 +1,15 @@
 {
   "build": {
     "distDir": "../frontend",
-    "devPath": "http://127.0.0.1:8000"
+    "devPath": "http://127.0.0.1:8000",
+    "withGlobalTauri": true
   },
   "package": {
     "version": "0.1.0",
     "productName": "Owlynn"
   },
   "tauri": {
+    "macOSPrivateApi": true,
     "allowlist": {
       "all": true
     },
@@ -24,7 +26,6 @@
       ],
       "targets": "all"
     },
-
     "security": {
       "csp": "default-src 'self' http://127.0.0.1:8000; script-src 'self' 'unsafe-eval' 'unsafe-inline' http://127.0.0.1:8000; style-src 'self' 'unsafe-inline' http://127.0.0.1:8000; img-src 'self' data: http://127.0.0.1:8000; connect-src 'self' ws://127.0.0.1:8000 http://127.0.0.1:8000; font-src 'self' http://127.0.0.1:8000;"
     },
@@ -34,8 +35,14 @@
         "height": 800,
         "resizable": true,
         "title": "Owlynn",
-        "width": 1000,
-        "fileDropEnabled": false
+        "width": 1200,
+        "minWidth": 800,
+        "minHeight": 600,
+        "transparent": true,
+        "decorations": true,
+        "fileDropEnabled": false,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true
       }
     ]
   }

@@ -33,6 +33,10 @@ workspace/
 
 # Test caches
 .pytest_cache/
+.hypothesis/
+
+# Kiro
+.kiro/
 
 # Rust / Tauri
 src-tauri/target/
