@@ -1,53 +1,158 @@
 ---
 name: Data Visualization
-triggers: [chart, graph, plot, visualize data, bar chart, pie chart, histogram, trend]
-description: Generates charts and graphs using notebook_run with matplotlib
+triggers: [chart, graph, plot, visualize data, bar chart, pie chart, histogram, trend, dashboard, scatter, heatmap, line chart, data chart]
+description: Generates charts and graphs from data using matplotlib via notebook_run
+category: data
+params:
+  - name: chart_type
+    description: "Type of chart: auto, bar, line, pie, scatter, histogram, heatmap, grouped_bar, stacked_bar"
+    required: false
+    default: auto
+  - name: theme
+    description: "Color theme: dark (Owlynn default), light, minimal"
+    required: false
+    default: dark
+tools_used: [read_workspace_file, notebook_run, web_search, fetch_webpage]
+chain_compatible: true
+version: "2.0"
 ---
-When the user wants data visualized as a chart or graph:
 
-1. Gather the data from the user's message, workspace files, or web search.
+You are a data visualization specialist. Create clear, accurate, and accessible charts from the user's data.
 
-2. Use notebook_run to generate the chart with matplotlib:
+## Step 1: Load the Data
+
+Determine where the data comes from and load it:
+
+**From a workspace file** (CSV, JSON, Excel):
+Use `read_workspace_file` to load the file contents, then parse it in notebook_run:
+```python
+import pandas as pd
+df = pd.read_csv("filename.csv")  # or read_json / read_excel
+print(df.head())
+print(df.dtypes)
+```
+
+**From the user's message**:
+Extract inline numbers, tables, or lists directly from the context below.
+
+**From the web**:
+Use `web_search` to find the data, then `fetch_webpage` to retrieve it. Parse tables or structured data in notebook_run.
+
+If no data can be found, ask the user to provide data or a filename.
+
+## Step 2: Choose the Chart Type
+
+When `{chart_type}` is set to **auto**, analyze the data shape and select the best chart type:
+
+| Data Shape | Chart Type |
+|---|---|
+| Time series (dates + values) | **Line chart** |
+| Categories with values | **Bar chart** |
+| Proportions summing to ~100% | **Pie chart** |
+| Two numeric variables | **Scatter plot** |
+| Single variable distribution | **Histogram** |
+| Matrix or correlation data | **Heatmap** |
+| Multiple categories with sub-groups | **Grouped bar** |
+| Parts of a whole over time | **Stacked bar** |
+
+If `{chart_type}` is explicitly set (e.g., "bar", "line", "pie"), use that type regardless of data shape.
+
+## Step 3: Generate the Chart
+
+Use `notebook_run` with matplotlib. Always define a reusable theme helper first:
 
 ```python
 import matplotlib
-matplotlib.use('Agg')  # Non-interactive backend
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+import numpy as np
 
-# Example: bar chart
-labels = ['A', 'B', 'C']
-values = [10, 25, 15]
+def apply_owlynn_theme(fig, ax, theme="{theme}"):
+    """Apply consistent Owlynn styling."""
+    if theme == "dark":
+        bg = '#121b30'
+        fg = '#e7edf8'
+        accent = '#c79a3b'
+        grid_color = '#2a3656'
+    elif theme == "light":
+        bg = '#ffffff'
+        fg = '#1a1a2e'
+        accent = '#b8860b'
+        grid_color = '#e0e0e0'
+    else:  # minimal
+        bg = '#fafafa'
+        fg = '#333333'
+        accent = '#555555'
+        grid_color = '#eeeeee'
 
-fig, ax = plt.subplots(figsize=(8, 5))
-ax.bar(labels, values, color='#c79a3b')
-ax.set_title('Title Here')
-ax.set_ylabel('Value')
+    fig.patch.set_facecolor(bg)
+    ax.set_facecolor(bg)
+    ax.tick_params(colors=fg)
+    ax.xaxis.label.set_color(fg)
+    ax.yaxis.label.set_color(fg)
+    ax.title.set_color(fg)
+    for spine in ax.spines.values():
+        spine.set_color(grid_color)
+    return accent
 
-# Dark theme to match Owlynn UI
-fig.patch.set_facecolor('#121b30')
-ax.set_facecolor('#121b30')
-ax.tick_params(colors='#e7edf8')
-ax.xaxis.label.set_color('#e7edf8')
-ax.yaxis.label.set_color('#e7edf8')
-ax.title.set_color('#e7edf8')
-for spine in ax.spines.values():
-    spine.set_color('#2a3656')
-
-plt.tight_layout()
-plt.savefig('/path/to/workspace/chart.png', dpi=150, facecolor=fig.get_facecolor())
-plt.close()
-print('Chart saved to chart.png')
+# Use colorblind-safe palette
+COLORS = ['#4477AA', '#EE6677', '#228833', '#CCBB44',
+           '#66CCEE', '#AA3377', '#BBBBBB', '#EE8866']
 ```
 
-3. After saving, tell the user the file is in their workspace.
+## Step 4: Multi-Chart Dashboard
 
-4. For simple comparisons that don't need a saved file, use inline HTML bars in the chat response instead (faster, no file needed).
+When the data has multiple dimensions or the user requests a dashboard, generate a subplot grid (up to 2×2):
 
-Chart types to consider:
-- Bar chart: comparing quantities
-- Line chart: trends over time
-- Pie chart: proportions/percentages
-- Horizontal bar: ranking items
-- Grouped bar: comparing multiple metrics
+```python
+fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+# Plot different aspects of the data in each subplot
+# axes[0,0] — overview chart
+# axes[0,1] — breakdown chart
+# axes[1,0] — trend chart
+# axes[1,1] — distribution chart
+for ax in axes.flat:
+    apply_owlynn_theme(fig, ax)
+plt.tight_layout()
+```
 
-Topic: {context}
+Only use subplots when the data genuinely benefits from multiple views. For simple data, use a single chart.
+
+## Step 5: Accessibility
+
+- Use the colorblind-safe `COLORS` palette above (never rely on red/green distinction alone)
+- Add a descriptive title and axis labels to every chart
+- After saving the chart, provide an **alt-text description** in your response:
+  > Alt-text: "Bar chart showing quarterly revenue for 2024. Q3 had the highest revenue at $4.2M, followed by Q4 at $3.8M."
+- Use patterns or markers in addition to color when distinguishing many series
+
+## Step 6: Save and Deliver
+
+```python
+plt.savefig('/path/to/workspace/chart.png', dpi=150, bbox_inches='tight',
+            facecolor=fig.get_facecolor())
+plt.close()
+print("Chart saved to chart.png")
+```
+
+Tell the user the chart file is in their workspace.
+
+## Fallback: Inline HTML Bars
+
+If `notebook_run` fails (missing library, environment issue), fall back to inline HTML bars in the chat response:
+
+```html
+<div style="font-family:sans-serif;max-width:500px">
+  <div style="margin:4px 0;display:flex;align-items:center;gap:8px">
+    <span style="width:80px;text-align:right;font-size:13px">{label}</span>
+    <div style="background:#4477AA;height:20px;border-radius:3px;width:{percent}%"></div>
+    <span style="font-size:13px">{value}</span>
+  </div>
+</div>
+```
+
+This is a quick visual fallback — recommend the user install matplotlib for full chart support.
+
+---
+
+Input: {context}
